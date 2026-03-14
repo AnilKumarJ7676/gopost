@@ -1,0 +1,85 @@
+platform :osx, '10.15'
+
+# CocoaPods analytics sends network stats synchronously affecting flutter build latency.
+ENV['COCOAPODS_DISABLE_STATS'] = 'true'
+
+project 'Runner', {
+  'Debug' => :debug,
+  'Profile' => :release,
+  'Release' => :release,
+}
+
+def flutter_root
+  generated_xcode_build_settings_path = File.expand_path(File.join('..', 'Flutter', 'ephemeral', 'Flutter-Generated.xcconfig'), __FILE__)
+  unless File.exist?(generated_xcode_build_settings_path)
+    raise "#{generated_xcode_build_settings_path} must exist. If you're running pod install manually, make sure \"flutter pub get\" is executed first"
+  end
+
+  File.foreach(generated_xcode_build_settings_path) do |line|
+    matches = line.match(/FLUTTER_ROOT\=(.*)/)
+    return matches[1].strip if matches
+  end
+  raise "FLUTTER_ROOT not found in #{generated_xcode_build_settings_path}. Try deleting Flutter-Generated.xcconfig, then run \"flutter pub get\""
+end
+
+require File.expand_path(File.join('packages', 'flutter_tools', 'bin', 'podhelper'), flutter_root)
+
+flutter_macos_podfile_setup
+
+target 'Runner' do
+  use_frameworks!
+
+  flutter_install_all_macos_pods File.dirname(File.realpath(__FILE__))
+
+  script_phase :name => 'Build Gopost Native Engine',
+    :script => <<~SCRIPT,
+      set -e
+      NATIVE_SRC="${PODS_ROOT}/../../native"
+      BUILD_DIR="${NATIVE_SRC}/build_macos"
+      FRAMEWORKS_DIR="${BUILT_PRODUCTS_DIR}/${FRAMEWORKS_FOLDER_PATH}"
+
+      mkdir -p "${BUILD_DIR}"
+      cmake -S "${NATIVE_SRC}" -B "${BUILD_DIR}" \
+        -DCMAKE_BUILD_TYPE=${CONFIGURATION} \
+        -DBUILD_TESTS=OFF \
+        -DOPENSSL_ROOT_DIR=$(brew --prefix openssl@3) \
+        -DCMAKE_OSX_ARCHITECTURES="${ARCHS}"
+      cmake --build "${BUILD_DIR}" --config ${CONFIGURATION} -j $(sysctl -n hw.ncpu)
+
+      mkdir -p "${FRAMEWORKS_DIR}"
+      rm -f "${FRAMEWORKS_DIR}/libgopost_image_engine.dylib" \
+            "${FRAMEWORKS_DIR}/libgopost_video_engine.dylib" \
+            "${FRAMEWORKS_DIR}/libcrypto.3.dylib"
+      cp "${BUILD_DIR}/gopost_image_engine/libgopost_image_engine.dylib" "${FRAMEWORKS_DIR}/"
+      cp "${BUILD_DIR}/gopost_video_engine/libgopost_video_engine.dylib" "${FRAMEWORKS_DIR}/"
+      install_name_tool -id "@rpath/libgopost_image_engine.dylib" "${FRAMEWORKS_DIR}/libgopost_image_engine.dylib"
+      install_name_tool -id "@rpath/libgopost_video_engine.dylib" "${FRAMEWORKS_DIR}/libgopost_video_engine.dylib"
+
+      OPENSSL_DIR=$(brew --prefix openssl@3)
+      CRYPTO_LIB="${OPENSSL_DIR}/lib/libcrypto.3.dylib"
+      if [ -f "${CRYPTO_LIB}" ]; then
+        cp "${CRYPTO_LIB}" "${FRAMEWORKS_DIR}/"
+        install_name_tool -id "@rpath/libcrypto.3.dylib" "${FRAMEWORKS_DIR}/libcrypto.3.dylib"
+        install_name_tool -change "${CRYPTO_LIB}" "@rpath/libcrypto.3.dylib" "${FRAMEWORKS_DIR}/libgopost_image_engine.dylib"
+        install_name_tool -change "${CRYPTO_LIB}" "@rpath/libcrypto.3.dylib" "${FRAMEWORKS_DIR}/libgopost_video_engine.dylib"
+        codesign --force --sign - --timestamp=none "${FRAMEWORKS_DIR}/libcrypto.3.dylib"
+      fi
+
+      codesign --force --sign - --timestamp=none "${FRAMEWORKS_DIR}/libgopost_image_engine.dylib"
+      codesign --force --sign - --timestamp=none "${FRAMEWORKS_DIR}/libgopost_video_engine.dylib"
+    SCRIPT
+    :execution_position => :before_compile
+
+  target 'RunnerTests' do
+    inherit! :search_paths
+  end
+end
+
+post_install do |installer|
+  installer.pods_project.targets.each do |target|
+    flutter_additional_macos_build_settings(target)
+    target.build_configurations.each do |config|
+      config.build_settings['LD_RUNPATH_SEARCH_PATHS'] ||= ['$(inherited)', '@executable_path/../Frameworks']
+    end
+  end
+end

@@ -1,0 +1,54 @@
+# Flutter
+gopost_app/.dart_tool/
+gopost_app/.packages
+gopost_app/build/
+gopost_app/.flutter-plugins
+gopost_app/.flutter-plugins-dependencies
+gopost_app/*.iml
+gopost_app/.idea/
+gopost_app/.metadata
+
+# Go
+gopost-backend/bin/
+gopost-backend/tmp/
+gopost-backend/vendor/
+
+# C/C++ Engine
+gopost_app/native/gopost_engine/build/
+gopost_app/native/gopost_engine/cmake-build-*/
+gopost_app/native/gopost_engine/third_party/ffmpeg/
+gopost_app/native/gopost_engine/third_party/openssl/
+gopost_app/native/gopost_engine/third_party/freetype/
+*.o
+*.a
+*.so
+*.dylib
+*.dll
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# Docker
+docker-compose.override.yml
+
+# Coverage
+coverage/
+*.lcov
+
+gopost_app/native/gopost_engine/build_macos/
+
+# Flutter SDK (local copy)
+flutter/

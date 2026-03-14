@@ -1,0 +1,51 @@
+name: Engine CI
+
+on:
+  push:
+    branches: [main]
+    paths: ['gopost_app/native/**']
+  pull_request:
+    branches: [main]
+    paths: ['gopost_app/native/**']
+
+jobs:
+  build-and-test:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake clang-tidy libgtest-dev
+
+      - name: Install dependencies (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          brew install cmake googletest llvm
+
+      - name: Run clang-tidy
+        working-directory: gopost_app/native/gopost_engine
+        run: |
+          cmake -B build -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
+          if command -v clang-tidy &> /dev/null; then
+            clang-tidy src/core/*.cpp -- -I include
+          fi
+        continue-on-error: true
+
+      - name: Build
+        working-directory: gopost_app/native/gopost_engine
+        run: |
+          cmake -B build -DCMAKE_BUILD_TYPE=Debug
+          cmake --build build
+
+      - name: Run tests
+        working-directory: gopost_app/native/gopost_engine
+        run: |
+          cd build && ctest --output-on-failure
