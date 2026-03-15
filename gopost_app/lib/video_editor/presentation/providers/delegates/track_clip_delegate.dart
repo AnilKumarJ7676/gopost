@@ -154,10 +154,20 @@ class TrackClipDelegate {
 
     final engineSourceType = _ops.toEngineSourceType(sourceType);
 
+    // Check for existing proxy BEFORE registering with the engine so the
+    // engine receives the proxy path when proxy playback is active.
+    final existingProxy = sourceType == ClipSourceType.video
+        ? await _ops.proxyService.existingProxyPath(sourcePath)
+        : null;
+
+    final useProxy = _ops.currentState.useProxyPlayback &&
+        existingProxy != null;
+    final enginePath = useProxy ? existingProxy : sourcePath;
+
     final descriptor = ClipDescriptor(
       trackIndex: trackIndex,
       sourceType: engineSourceType,
-      sourcePath: sourcePath,
+      sourcePath: enginePath,
       timelineRange: TimelineRange(inTime: inTime, outTime: outTime),
       sourceRange: SourceRange(sourceIn: 0, sourceOut: duration),
       speed: 1.0,
@@ -168,10 +178,6 @@ class TrackClipDelegate {
 
     try {
       final clipId = await _ops.engine.addClip(project.timelineId, descriptor);
-
-      final existingProxy = sourceType == ClipSourceType.video
-          ? await _ops.proxyService.existingProxyPath(sourcePath)
-          : null;
 
       final clip = VideoClip(
         id: clipId,
@@ -556,12 +562,39 @@ class TrackClipDelegate {
   // Selection
   // -------------------------------------------------------------------------
 
-  void selectClip(int? clipId) {
+  Future<void> selectClip(int? clipId) async {
     _ops.currentState = _ops.currentState.copyWith(
       selectedClipId: clipId,
       clearSelection: clipId == null,
     );
+
+    // When a clip is selected, move the playhead to the clip's start if it's
+    // not already within the clip's range.  This ensures the preview panel
+    // shows the selected clip immediately instead of remaining blank.
+    if (clipId != null) {
+      final clip = _ops.currentState.project?.findClip(clipId);
+      if (clip != null) {
+        final pos = _ops.currentState.playback.positionSeconds;
+        final needsSeek = pos < clip.timelineIn || pos >= clip.timelineOut;
+        final seekTarget = needsSeek ? clip.timelineIn : pos;
+        if (needsSeek) {
+          _ops.currentState = _ops.currentState.copyWith(
+            playback: _ops.currentState.playback.copyWith(
+              positionSeconds: seekTarget,
+            ),
+          );
+        }
+        // Always sync the engine position so renderCurrentFrame produces the
+        // correct frame for this clip.
+        final project = _ops.currentState.project;
+        if (project != null) {
+          await _ops.engine.seek(project.timelineId, seekTarget);
+        }
+      }
+    }
+
     _ops.updateActiveVideo();
+    await _ops.renderCurrentFrame();
   }
 
   VideoClip? get clipUnderPlayhead {

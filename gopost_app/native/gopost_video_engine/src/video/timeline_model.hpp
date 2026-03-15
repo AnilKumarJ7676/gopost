@@ -63,6 +63,8 @@ struct Track {
     TrackType type = TrackType::Video;
     std::vector<Clip> clips;
     TrackAudioConfig audio;
+    bool sync_locked = false;
+    float height = 68.0f;
 };
 
 struct TimelineConfig {
@@ -138,6 +140,22 @@ public:
     int32_t duplicate_clip(int32_t clip_id);
     std::vector<double> snap_points(double time_sec, double threshold_sec) const;
     bool reorder_tracks(const std::vector<int32_t>& new_order);
+
+    /* Phase 7: Extended clip engine operations */
+    bool move_multiple_clips(const std::vector<int32_t>& clip_ids, double delta_time, int32_t delta_track);
+    bool swap_clips(int32_t clip_id_a, int32_t clip_id_b);
+    int32_t split_all_tracks(double split_time);
+    bool lift_delete(int32_t track_index, double range_start, double range_end);
+
+    /** Collision detection: 0=CLEAR, 1=OVERLAP, 2=ADJACENT */
+    int32_t check_overlap(int32_t track_index, double in_time, double out_time,
+                          int32_t exclude_clip_id = -1) const;
+    std::vector<int32_t> get_overlapping_clips(int32_t track_index,
+                                                double in_time, double out_time) const;
+
+    bool set_track_sync_lock(int32_t track_index, bool locked);
+    bool set_track_height(int32_t track_index, float height_px);
+    float get_track_height(int32_t track_index) const;
 
 private:
     TimelineConfig config_;

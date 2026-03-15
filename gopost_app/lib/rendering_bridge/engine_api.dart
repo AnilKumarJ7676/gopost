@@ -61,9 +61,25 @@ abstract class EngineLifecycle {
   Future<String> getVersion();
 }
 
+/// Hardware decoder capability info.
+class HwDecoderInfo {
+  final bool available;
+  final String deviceName;
+  final int maxWidth;
+  final int maxHeight;
+
+  const HwDecoderInfo({
+    required this.available,
+    this.deviceName = '',
+    this.maxWidth = 0,
+    this.maxHeight = 0,
+  });
+}
+
 /// ISP: GPU-related queries separated from main engine.
 abstract class GpuQueryable {
   Future<GpuCapabilities> queryGpuCapabilities();
+  Future<HwDecoderInfo> queryHwDecoder();
 }
 
 /// ISP: Template load/unload operations.
@@ -597,8 +613,80 @@ class MediaInfo {
   });
 }
 
-/// Video timeline operations (S8-05). All timelines share the same native engine.
-abstract class VideoTimelineEngine {
+// =========================================================================
+// ISP: Segregated interfaces for the video timeline engine.
+// Each interface represents a single responsibility. Implementations
+// compose them via `VideoTimelineEngine`.
+// =========================================================================
+
+/// Timeline lifecycle: create, destroy, configure.
+abstract class TimelineLifecycle {
+  Future<int> createTimeline(TimelineConfig config);
+  Future<void> destroyTimeline(int timelineId);
+  Future<TimelineConfig> getTimelineConfig(int timelineId);
+  Future<double> getDuration(int timelineId);
+}
+
+/// Track CRUD and configuration.
+abstract class TimelineTrackOps {
+  Future<int> addTrack(int timelineId, VideoTrackType type);
+  Future<void> removeTrack(int timelineId, int trackIndex);
+  Future<int> getTrackCount(int timelineId);
+  Future<void> reorderTracks(int timelineId, List<int> newOrder);
+  Future<void> setTrackSyncLock(int timelineId, int trackIndex, bool locked);
+  Future<void> setTrackHeight(int timelineId, int trackIndex, double heightPx);
+  Future<double> getTrackHeight(int timelineId, int trackIndex);
+}
+
+/// Clip CRUD, move, trim, split, and collision detection.
+abstract class TimelineClipOps {
+  Future<int> addClip(int timelineId, ClipDescriptor descriptor);
+  Future<void> removeClip(int timelineId, int clipId);
+  Future<void> trimClip(int timelineId, int clipId, TimelineRange newRange, SourceRange newSource);
+  Future<void> moveClip(int timelineId, int clipId, int newTrackIndex, double newInTime);
+  Future<int?> splitClip(int timelineId, int clipId, double splitTimeSeconds);
+  Future<void> rippleDelete(int timelineId, int trackIndex, double rangeStartSeconds, double rangeEndSeconds);
+  Future<void> moveMultipleClips(int timelineId, List<int> clipIds, double deltaTime, int deltaTrack);
+  Future<void> swapClips(int timelineId, int clipIdA, int clipIdB);
+  Future<int> splitAllTracks(int timelineId, double splitTimeSeconds);
+  Future<void> liftDelete(int timelineId, int trackIndex, double rangeStartSeconds, double rangeEndSeconds);
+  /// Collision detection: 0=CLEAR, 1=OVERLAP, 2=ADJACENT.
+  Future<int> checkOverlap(int timelineId, int trackIndex, double inTime, double outTime, {int excludeClipId = -1});
+  Future<List<int>> getOverlappingClips(int timelineId, int trackIndex, double inTime, double outTime);
+}
+
+/// Playback, seek, render, frame cache.
+abstract class TimelinePlayback {
+  Future<void> seek(int timelineId, double positionSeconds);
+  Future<DecodedImage?> renderFrame(int timelineId);
+  Future<double> getPosition(int timelineId);
+  Future<void> setFrameCacheSizeBytes(int timelineId, int maxBytes);
+  Future<void> invalidateFrameCache(int timelineId);
+}
+
+/// NLE edit operations (insert, overwrite, roll, slip, slide, etc.).
+abstract class TimelineNleEdits {
+  Future<int> insertEdit(int timelineId, int trackIndex, double atTime, ClipDescriptor clip);
+  Future<int> overwriteEdit(int timelineId, int trackIndex, double atTime, ClipDescriptor clip);
+  Future<void> rollEdit(int timelineId, int clipId, double deltaSec);
+  Future<void> slipEdit(int timelineId, int clipId, double deltaSec);
+  Future<void> slideEdit(int timelineId, int clipId, double deltaSec);
+  Future<void> rateStretch(int timelineId, int clipId, double newDurationSec);
+  Future<int> duplicateClip(int timelineId, int clipId);
+  Future<List<double>> getSnapPoints(int timelineId, double timeSec, double thresholdSec);
+}
+
+/// Media probing.
+abstract class TimelineMediaProbe {
+  Future<MediaInfo?> probeMedia(String filePath);
+  Future<MediaInfo?> probeMediaFast(String filePath);
+}
+
+/// Composite interface — backwards-compatible with existing code.
+/// All timelines share the same native engine.
+abstract class VideoTimelineEngine implements
+    TimelineLifecycle, TimelineTrackOps, TimelineClipOps, TimelinePlayback,
+    TimelineNleEdits, TimelineMediaProbe {
   Future<int> createTimeline(TimelineConfig config);
   Future<void> destroyTimeline(int timelineId);
   Future<TimelineConfig> getTimelineConfig(int timelineId);
@@ -622,6 +710,12 @@ abstract class VideoTimelineEngine {
 
   /// Probe a media file for metadata (duration, dimensions, audio info).
   Future<MediaInfo?> probeMedia(String filePath);
+
+  /// Fast, non-blocking probe using only header parsing or file-size
+  /// heuristic. Returns immediately (< 100ms) with best-effort metadata.
+  /// Callers should follow up with [probeMedia] in the background if
+  /// accurate duration is needed.
+  Future<MediaInfo?> probeMediaFast(String filePath);
 
   /// Set per-clip audio volume (0.0–2.0). Default is 1.0.
   Future<void> setClipVolume(int timelineId, int clipId, double volume);
@@ -818,6 +912,69 @@ abstract class VideoTimelineEngine {
 
   /// Flatten a multi-cam clip into individual clips on the track.
   Future<void> flattenMultiCam(int timelineId, int clipId);
+
+  // =========================================================================
+  // Phase 7: Extended Clip Engine — multi-clip, collision, sync-lock
+  // =========================================================================
+
+  /// Move multiple clips simultaneously (group move).
+  @override
+  Future<void> moveMultipleClips(int timelineId, List<int> clipIds, double deltaTime, int deltaTrack);
+
+  /// Swap two clips on the timeline.
+  @override
+  Future<void> swapClips(int timelineId, int clipIdA, int clipIdB);
+
+  /// Split all tracks at a given time. Returns count of new clips created.
+  @override
+  Future<int> splitAllTracks(int timelineId, double splitTimeSeconds);
+
+  /// Lift delete: remove clips in range without closing gap.
+  @override
+  Future<void> liftDelete(int timelineId, int trackIndex, double rangeStartSeconds, double rangeEndSeconds);
+
+  /// Collision detection: 0=CLEAR, 1=OVERLAP, 2=ADJACENT.
+  @override
+  Future<int> checkOverlap(int timelineId, int trackIndex, double inTime, double outTime, {int excludeClipId = -1});
+
+  /// Get IDs of clips overlapping a region.
+  @override
+  Future<List<int>> getOverlappingClips(int timelineId, int trackIndex, double inTime, double outTime);
+
+  /// Set sync-lock on a track.
+  @override
+  Future<void> setTrackSyncLock(int timelineId, int trackIndex, bool locked);
+
+  /// Set persisted track height.
+  @override
+  Future<void> setTrackHeight(int timelineId, int trackIndex, double heightPx);
+
+  /// Get persisted track height.
+  @override
+  Future<double> getTrackHeight(int timelineId, int trackIndex);
+
+  // =========================================================================
+  // Texture Bridge (GPU preview pipeline)
+  // =========================================================================
+
+  /// Create a native texture bridge for GPU-rendered preview.
+  /// Returns a bridge-local texture ID. For CPU-bridge mode, the Dart side
+  /// reads pixels back via [getTextureBridgePixels].
+  Future<int> createTextureBridge(int width, int height);
+
+  /// Destroy the texture bridge.
+  Future<void> destroyTextureBridge();
+
+  /// Render the current timeline frame and push it to the texture bridge.
+  /// Returns true if a frame was successfully rendered and pushed.
+  Future<bool> renderToTextureBridge(int timelineId);
+
+  /// Resize the texture bridge (e.g. when preview panel resizes).
+  Future<void> resizeTextureBridge(int width, int height);
+
+  /// Read back the current front buffer as RGBA pixels.
+  /// Returns null if no frame has been rendered yet.
+  Future<Uint8List?> getTextureBridgePixels();
 }
 
 /// Export configuration passed to the native engine.
@@ -1175,5 +1332,49 @@ class MultiCamConfig {
     required this.name,
     required this.angles,
     required this.durationSec,
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Decoder Pool & Thumbnail Generator
+// ---------------------------------------------------------------------------
+
+/// Priority for decoder acquire requests.
+enum DecoderPriority { high, medium, low }
+
+/// Thumbnail job status reported by the native generator.
+enum ThumbnailJobStatus { queued, inProgress, completed, failed, cancelled }
+
+/// A single thumbnail result from the native generator.
+class NativeThumbnailResult {
+  final Uint8List jpegData;
+  final int width;
+  final int height;
+  final double timestamp;
+
+  const NativeThumbnailResult({
+    required this.jpegData,
+    required this.width,
+    required this.height,
+    required this.timestamp,
+  });
+}
+
+/// Request for native thumbnail extraction.
+class NativeThumbnailRequest {
+  final String sourcePath;
+  final double sourceDuration;
+  final int count;
+  final int thumbWidth;
+  final int thumbHeight;
+  final DecoderPriority priority;
+
+  const NativeThumbnailRequest({
+    required this.sourcePath,
+    required this.sourceDuration,
+    required this.count,
+    this.thumbWidth = 160,
+    this.thumbHeight = 90,
+    this.priority = DecoderPriority.medium,
   });
 }

@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:path_provider/path_provider.dart';
+import 'package:gopost_app/video_editor/domain/models/media_asset.dart';
 import 'package:gopost_app/video_editor/domain/models/video_project.dart';
 import 'package:gopost_app/video_editor/domain/repositories/video_project_repository.dart';
 
@@ -11,6 +12,7 @@ class VideoProjectLocalDatasource {
   static const _projectsDir = 'video_projects';
   static const _metaFile = 'meta.json';
   static const _projectFile = 'project.json';
+  static const _mediaPoolFile = 'media_pool.json';
 
   Future<Directory> _projectsRoot() async {
     final docs = await getApplicationDocumentsDirectory();
@@ -104,5 +106,27 @@ class VideoProjectLocalDatasource {
   Future<void> delete(String id) async {
     final dir = await _projectDir(id);
     if (await dir.exists()) await dir.delete(recursive: true);
+  }
+
+  // ---------------------------------------------------------------------------
+  // Media Pool persistence
+  // ---------------------------------------------------------------------------
+
+  Future<void> saveMediaPool(String projectId, MediaPoolData poolData) async {
+    final dir = await _projectDir(projectId);
+    await File('${dir.path}/$_mediaPoolFile')
+        .writeAsString(jsonEncode(poolData.toMap()));
+  }
+
+  Future<MediaPoolData?> loadMediaPool(String projectId) async {
+    final dir = await _projectDir(projectId);
+    final file = File('${dir.path}/$_mediaPoolFile');
+    if (!await file.exists()) return null;
+    try {
+      final raw = jsonDecode(await file.readAsString()) as Map<String, dynamic>;
+      return MediaPoolData.fromMap(raw);
+    } catch (_) {
+      return null;
+    }
   }
 }

@@ -44,9 +44,54 @@ class ProxyGenerationService implements ProxyService {
     final dir = await _dir;
     final file = File('${dir.path}/${_proxyFileName(sourcePath)}');
     if (await file.exists() && await file.length() > 0) {
+      // Verify the MP4 is playable by checking for a moov atom.
+      // Incomplete ffmpeg runs produce files with bytes but no moov,
+      // which causes "moov atom not found" errors in media_kit/mpv.
+      if (!await _hasMoovAtom(file)) {
+        // Corrupt proxy — delete so it can be regenerated.
+        try { await file.delete(); } catch (_) {}
+        return null;
+      }
       return file.path;
     }
     return null;
+  }
+
+  /// Quick check for a valid MP4: scan the first 64 KB for 'moov' or 'ftyp'
+  /// box headers. A valid MP4 produced with -movflags +faststart will have
+  /// the moov atom near the beginning of the file.
+  static Future<bool> _hasMoovAtom(File file) async {
+    try {
+      final raf = await file.open(mode: FileMode.read);
+      try {
+        // Read up to 128 KB — faststart puts moov near the top.
+        final len = await file.length();
+        final readLen = len < 131072 ? len : 131072;
+        final bytes = await raf.read(readLen.toInt());
+        // Scan for 'moov' (0x6D6F6F76) or 'ftyp' (0x66747970) box type.
+        bool foundFtyp = false;
+        bool foundMoov = false;
+        for (int i = 0; i < bytes.length - 3; i++) {
+          if (bytes[i] == 0x66 && bytes[i+1] == 0x74 &&
+              bytes[i+2] == 0x79 && bytes[i+3] == 0x70) {
+            foundFtyp = true;
+          }
+          if (bytes[i] == 0x6D && bytes[i+1] == 0x6F &&
+              bytes[i+2] == 0x6F && bytes[i+3] == 0x76) {
+            foundMoov = true;
+            break;
+          }
+        }
+        // With -movflags +faststart, moov should be near the start.
+        // If we found ftyp but no moov in the first 128KB, the file is
+        // likely corrupt. If we didn't even find ftyp, it's not an MP4.
+        return foundMoov;
+      } finally {
+        await raf.close();
+      }
+    } catch (_) {
+      return false;
+    }
   }
 
   @override
@@ -150,6 +195,7 @@ class ProxyGenerationService implements ProxyService {
   @override
   Future<bool> verifyProxy(String proxyPath) async {
     final file = File(proxyPath);
-    return await file.exists() && await file.length() > 0;
+    if (!await file.exists() || await file.length() == 0) return false;
+    return _hasMoovAtom(file);
   }
 }

@@ -1,6 +1,3 @@
-import 'dart:io' show Platform;
-
-import 'package:flutter/foundation.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -8,8 +5,11 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:gopost_app/video_editor/domain/models/playback_state.dart';
 import 'package:gopost_app/video_editor/domain/models/timeline_drag_data.dart';
 import 'package:gopost_app/video_editor/domain/models/video_effect.dart';
+import 'package:gopost_app/video_editor/domain/models/media_asset.dart';
 import 'package:gopost_app/video_editor/domain/models/video_project.dart';
 import 'package:gopost_app/video_editor/domain/models/video_transition.dart';
+import 'package:gopost_app/video_editor/presentation/providers/editor_layout_notifier.dart';
+import 'package:gopost_app/video_editor/presentation/widgets/resizable_split.dart';
 import 'package:gopost_app/video_editor/presentation/providers/delegates/effect_color_delegate.dart';
 import 'package:gopost_app/video_editor/presentation/providers/timeline_notifier.dart';
 import 'package:gopost_app/video_editor/presentation/widgets/playhead_widget.dart';
@@ -20,14 +20,7 @@ const double _rulerHeight = 34;
 const double _scrollbarHeight = 20;
 const double _snapThresholdPx = 8;
 
-bool get _isMobilePlatform {
-  if (kIsWeb) return false;
-  try {
-    return Platform.isIOS || Platform.isAndroid;
-  } catch (_) {
-    return false;
-  }
-}
+// Removed: _isMobilePlatform — pinch-to-zoom is now enabled on all platforms.
 
 class TimelinePanel extends ConsumerStatefulWidget {
   const TimelinePanel({super.key});
@@ -58,6 +51,9 @@ class _TimelinePanelState extends ConsumerState<TimelinePanel> {
 
   /// Pinch-to-zoom baseline for mobile.
   double? _pinchBaselinePxPerSec;
+
+  /// Track the last seen duration so we can auto-fit when new clips change it.
+  double _lastAutoFitDuration = 0;
 
   @override
   void initState() {
@@ -187,17 +183,51 @@ class _TimelinePanelState extends ConsumerState<TimelinePanel> {
     final duration = ref.watch(timelineNotifierProvider.select((s) => s.duration));
     final inPoint = ref.watch(timelineNotifierProvider.select((s) => s.playback.inPoint));
     final outPoint = ref.watch(timelineNotifierProvider.select((s) => s.playback.outPoint));
+    final autoFitEnabled = ref.watch(timelineNotifierProvider.select((s) => s.autoFitEnabled));
 
     final effectiveDuration = duration > 0 ? duration : 10.0;
-    final totalWidth = effectiveDuration * pxPerSec + 200;
+    // Minimal trailing padding — just enough for the playhead to be dragged
+    // past the last clip edge. No large fixed padding that wastes space.
+    final totalWidth = effectiveDuration * pxPerSec + 60;
 
     return LayoutBuilder(
       builder: (context, constraints) {
         final viewportWidth = constraints.maxWidth - kTrackHeaderWidth;
+
+        // Dynamic auto-fit: whenever the duration changes (clips added/removed/
+        // trimmed) and auto-fit is enabled, automatically scale all clips to
+        // fill the available viewport sequentially with no gaps and no overflow.
+        // Pinch-to-zoom or manual zoom disables this; "Fit All" re-enables it.
+        if (duration > 0 &&
+            (duration - _lastAutoFitDuration).abs() > 0.01 &&
+            autoFitEnabled) {
+          _lastAutoFitDuration = duration;
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (!mounted) return;
+            ref.read(timelineNotifierProvider.notifier).zoomToFit(viewportWidth);
+            if (_hScrollController.hasClients) {
+              _hScrollController.jumpTo(0);
+            }
+          });
+        }
         const toolbarHeight = 42.0;
-        final tracksHeight = tracks.length * kTrackHeight;
+        const trackSplitterHeight = 4.0;
+        final layoutState = ref.watch(editorLayoutProvider);
+        final layoutNotifier = ref.read(editorLayoutProvider.notifier);
+
+        // Per-track heights from layout state
+        double tracksHeight = 0;
+        final perTrackHeights = <int, double>{};
+        for (final t in tracks) {
+          final h = layoutState.trackHeight(t.index);
+          perTrackHeights[t.index] = h;
+          tracksHeight += h;
+        }
+        // Add splitter heights between tracks
+        final splitterCount = tracks.length > 1 ? tracks.length - 1 : 0;
+        final totalTracksHeight = tracksHeight + splitterCount * trackSplitterHeight;
         final availableForTracks = constraints.maxHeight - toolbarHeight - _rulerHeight - _scrollbarHeight;
-        final needsVerticalScroll = tracksHeight > availableForTracks;
+        final needsVerticalScroll = totalTracksHeight > availableForTracks;
 
         Widget trackRow = Row(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -205,15 +235,39 @@ class _TimelinePanelState extends ConsumerState<TimelinePanel> {
             SizedBox(
               width: kTrackHeaderWidth,
               child: Column(
-                children: tracks.map((t) => TrackHeader(
-                  key: ValueKey('th_${t.index}'),
-                  track: t,
-                  onToggleVisibility: () => ref.read(timelineNotifierProvider.notifier).toggleTrackVisibility(t.index),
-                  onToggleLock: () => ref.read(timelineNotifierProvider.notifier).toggleTrackLock(t.index),
-                  onToggleMute: () => ref.read(timelineNotifierProvider.notifier).toggleTrackMute(t.index),
-                  onToggleSolo: () => ref.read(timelineNotifierProvider.notifier).toggleTrackSolo(t.index),
-                  onRemove: tracks.length > 1 ? () => _confirmRemoveTrack(context, t) : null,
-                )).toList(),
+                children: [
+                  for (int i = 0; i < tracks.length; i++) ...[
+                    TrackHeader(
+                      key: ValueKey('th_${tracks[i].index}'),
+                      track: tracks[i],
+                      height: perTrackHeights[tracks[i].index]!,
+                      onToggleVisibility: () => ref.read(timelineNotifierProvider.notifier).toggleTrackVisibility(tracks[i].index),
+                      onToggleLock: () => ref.read(timelineNotifierProvider.notifier).toggleTrackLock(tracks[i].index),
+                      onToggleMute: () => ref.read(timelineNotifierProvider.notifier).toggleTrackMute(tracks[i].index),
+                      onToggleSolo: () => ref.read(timelineNotifierProvider.notifier).toggleTrackSolo(tracks[i].index),
+                      onRemove: tracks.length > 1 ? () => _confirmRemoveTrack(context, tracks[i]) : null,
+                    ),
+                    // Per-track splitter between tracks
+                    if (i < tracks.length - 1)
+                      TrackSplitter(
+                        trackIndex: tracks[i].index,
+                        onDrag: (delta) {
+                          final oldH = perTrackHeights[tracks[i].index]!;
+                          final nextOldH = perTrackHeights[tracks[i + 1].index]!;
+                          final newH = (oldH + delta).clamp(kLayoutMinTrackHeight, kLayoutMaxTrackHeight);
+                          final newNextH = (nextOldH - delta).clamp(kLayoutMinTrackHeight, kLayoutMaxTrackHeight);
+                          layoutNotifier.setTrackHeight(tracks[i].index, newH);
+                          layoutNotifier.setTrackHeight(tracks[i + 1].index, newNextH);
+                        },
+                        onDoubleTap: () {
+                          layoutNotifier.resetTrackHeight(tracks[i].index);
+                          if (i + 1 < tracks.length) {
+                            layoutNotifier.resetTrackHeight(tracks[i + 1].index);
+                          }
+                        },
+                      ),
+                  ],
+                ],
               ),
             ),
             Expanded(
@@ -223,21 +277,22 @@ class _TimelinePanelState extends ConsumerState<TimelinePanel> {
                     _onTimelinePointerSignal(event, pxPerSec, viewportWidth);
                   }
                 },
-                child: _isMobilePlatform
-                  ? GestureDetector(
-                      onScaleStart: (_) {
-                        _pinchBaselinePxPerSec = pxPerSec;
-                      },
-                      onScaleUpdate: (d) {
-                        if (_pinchBaselinePxPerSec != null && d.pointerCount >= 2) {
-                          final newPxPerSec = (_pinchBaselinePxPerSec! * d.scale).clamp(20.0, 400.0);
-                          ref.read(timelineNotifierProvider.notifier).setZoom(newPxPerSec);
-                        }
-                      },
-                      onScaleEnd: (_) { _pinchBaselinePxPerSec = null; },
-                      child: _buildTrackScrollArea(totalWidth, availableForTracks, tracksHeight, pxPerSec, tracks, selectedClipId, playheadPos, duration),
-                    )
-                  : _buildTrackScrollArea(totalWidth, availableForTracks, tracksHeight, pxPerSec, tracks, selectedClipId, playheadPos, duration),
+                // Pinch-to-zoom on ALL platforms (mobile touch + desktop trackpad).
+                // Pinch overrides auto-fit — user controls zoom level manually.
+                child: GestureDetector(
+                    onScaleStart: (_) {
+                      _pinchBaselinePxPerSec = pxPerSec;
+                    },
+                    onScaleUpdate: (d) {
+                      if (_pinchBaselinePxPerSec != null && d.pointerCount >= 2) {
+                        final newPxPerSec = (_pinchBaselinePxPerSec! * d.scale).clamp(0.01, 400.0);
+                        // setZoom disables autoFitEnabled in the notifier
+                        ref.read(timelineNotifierProvider.notifier).setZoom(newPxPerSec);
+                      }
+                    },
+                    onScaleEnd: (_) { _pinchBaselinePxPerSec = null; },
+                    child: _buildTrackScrollArea(totalWidth, availableForTracks, totalTracksHeight, pxPerSec, tracks, selectedClipId, playheadPos, duration, perTrackHeights),
+                  ),
               ),
             ),
           ],
@@ -246,7 +301,7 @@ class _TimelinePanelState extends ConsumerState<TimelinePanel> {
         if (needsVerticalScroll) {
           trackRow = SingleChildScrollView(
             controller: _vScrollController,
-            child: SizedBox(height: tracksHeight, child: trackRow),
+            child: SizedBox(height: totalTracksHeight, child: trackRow),
           );
         }
 
@@ -350,12 +405,13 @@ class _TimelinePanelState extends ConsumerState<TimelinePanel> {
   Widget _buildTrackScrollArea(
     double totalWidth,
     double availableForTracks,
-    double tracksHeight,
+    double totalTracksHeight,
     double pxPerSec,
     List<VideoTrack> tracks,
     int? selectedClipId,
     double playheadPos,
     double duration,
+    Map<int, double> perTrackHeights,
   ) {
     final isScrubbing = ref.watch(timelineNotifierProvider.select((s) => s.playback.isScrubbing));
     final notifier = ref.read(timelineNotifierProvider.notifier);
@@ -382,7 +438,8 @@ class _TimelinePanelState extends ConsumerState<TimelinePanel> {
                   onWillAcceptWithDetails: (details) =>
                       details.data is AdjustmentClipDragData ||
                       details.data is PresetClipDragData ||
-                      details.data is EffectDragData,
+                      details.data is EffectDragData ||
+                      details.data is MediaAssetDragData,
                   onAcceptWithDetails: (details) {
                     final dropX = details.offset.dx;
                     final renderBox = context.findRenderObject() as RenderBox?;
@@ -412,6 +469,8 @@ class _TimelinePanelState extends ConsumerState<TimelinePanel> {
                         ),
                         atTime: atTime,
                       );
+                    } else if (data is MediaAssetDragData) {
+                      _handleMediaAssetDrop(data.asset, atTime);
                     }
                   },
                   builder: (context, candidateData, rejectedData) {
@@ -435,27 +494,35 @@ class _TimelinePanelState extends ConsumerState<TimelinePanel> {
                 ),
               ),
               Positioned(
-                left: 0, right: 0, top: 0, height: tracksHeight,
+                left: 0, right: 0, top: 0, height: totalTracksHeight,
                 child: Column(
-                  children: tracks.map((track) => RepaintBoundary(
-                    child: TrackLane(
-                      key: ValueKey('tl_${track.index}'),
-                      track: track,
-                      pixelsPerSecond: pxPerSec,
-                      totalWidth: totalWidth,
-                      selectedClipId: selectedClipId,
-                      playheadPosition: playheadPos,
-                      onClipTap: (id) => notifier.selectClip(id),
-                      onClipDragUpdate: _onClipDragUpdate,
-                      onClipDragEnd: _onClipDragEnd,
-                      onClipTrimLeftUpdate: _onTrimLeftUpdate,
-                      onClipTrimLeftEnd: _onTrimLeftEnd,
-                      onClipTrimRightUpdate: _onTrimRightUpdate,
-                      onClipTrimRightEnd: _onTrimRightEnd,
-                      onEffectDrop: _onEffectDrop,
-                      onTransitionDropBetween: _onTransitionDropBetween,
-                    ),
-                  )).toList(),
+                  children: [
+                    for (int i = 0; i < tracks.length; i++) ...[
+                      RepaintBoundary(
+                        child: TrackLane(
+                          key: ValueKey('tl_${tracks[i].index}'),
+                          track: tracks[i],
+                          pixelsPerSecond: pxPerSec,
+                          totalWidth: totalWidth,
+                          selectedClipId: selectedClipId,
+                          trackHeight: perTrackHeights[tracks[i].index]!,
+                          playheadPosition: playheadPos,
+                          onClipTap: (id) => notifier.selectClip(id),
+                          onClipDragUpdate: _onClipDragUpdate,
+                          onClipDragEnd: _onClipDragEnd,
+                          onClipTrimLeftUpdate: _onTrimLeftUpdate,
+                          onClipTrimLeftEnd: _onTrimLeftEnd,
+                          onClipTrimRightUpdate: _onTrimRightUpdate,
+                          onClipTrimRightEnd: _onTrimRightEnd,
+                          onEffectDrop: _onEffectDrop,
+                          onTransitionDropBetween: _onTransitionDropBetween,
+                        ),
+                      ),
+                      // Add splitter space between track lanes
+                      if (i < tracks.length - 1)
+                        const SizedBox(height: 4),
+                    ],
+                  ],
                 ),
               ),
               _PlayheadOverlay(
@@ -524,7 +591,8 @@ class _TimelinePanelState extends ConsumerState<TimelinePanel> {
       // Zoom centered on cursor position
       final scrollDelta = event.scrollDelta.dy;
       final zoomFactor = scrollDelta > 0 ? 1 / 1.15 : 1.15;
-      final newPxPerSec = (pxPerSec * zoomFactor).clamp(20.0, 400.0);
+      final newPxPerSec = (pxPerSec * zoomFactor).clamp(0.01, 400.0);
+      // setZoom disables autoFitEnabled in the notifier
 
       if (_hScrollController.hasClients) {
         final cursorLocalX = event.localPosition.dx;
@@ -639,7 +707,8 @@ class _TimelinePanelState extends ConsumerState<TimelinePanel> {
     const toolbarHeight = 42.0;
     const tracksTop = toolbarHeight + _rulerHeight;
     final relativeY = localY - tracksTop + (_vScrollController.hasClients ? _vScrollController.offset : 0);
-    final idx = (relativeY / kTrackHeight).floor().clamp(0, tracks.length - 1);
+    final dynHeight = ref.read(timelineNotifierProvider).trackHeight;
+    final idx = (relativeY / dynHeight).floor().clamp(0, tracks.length - 1);
     _dragTargetTrack = tracks[idx].index;
   }
 
@@ -758,6 +827,79 @@ class _TimelinePanelState extends ConsumerState<TimelinePanel> {
             duration: clip.duration,
           );
         }
+      case MediaAssetDragData():
+        // Media asset drops on clips are rejected by _ClipDropTarget
+        // (onWillAcceptWithDetails returns false), so they fall through to
+        // the background DragTarget which calls _handleMediaAssetDrop.
+        break;
+    }
+  }
+
+  Future<void> _handleMediaAssetDrop(MediaAsset asset, double atTime) async {
+    if (asset.status == MediaAssetStatus.offline) return;
+    final notifier = ref.read(timelineNotifierProvider.notifier);
+    final state = ref.read(timelineNotifierProvider);
+
+    final ClipSourceType sourceType;
+    TrackType targetTrackType;
+
+    switch (asset.type) {
+      case MediaAssetType.video:
+        sourceType = ClipSourceType.video;
+        targetTrackType = TrackType.video;
+      case MediaAssetType.image:
+        sourceType = ClipSourceType.image;
+        targetTrackType = TrackType.video;
+      case MediaAssetType.audio:
+        sourceType = ClipSourceType.video;
+        targetTrackType = TrackType.audio;
+    }
+
+    var track = state.tracks.where((t) => t.type == targetTrackType).firstOrNull;
+    if (track == null && asset.type == MediaAssetType.audio) {
+      await notifier.addTrack(TrackType.audio);
+      final updated = ref.read(timelineNotifierProvider);
+      track = updated.tracks.where((t) => t.type == TrackType.audio).firstOrNull;
+    }
+    if (track == null) return;
+
+    // Use probed duration if available; otherwise do a fast probe so the
+    // clip is created with a reasonable duration rather than a blind fallback.
+    double duration = asset.durationSeconds;
+    if (duration <= 0 && asset.type != MediaAssetType.image) {
+      final fastInfo = await notifier.probeMediaFast(asset.filePath);
+      duration = fastInfo?.durationSeconds ?? 0;
+    }
+    if (duration <= 0) {
+      duration = asset.type == MediaAssetType.image ? 5.0 : 10.0;
+    }
+
+    final clipId = await notifier.addClip(
+      trackIndex: track.index,
+      sourceType: sourceType,
+      sourcePath: asset.filePath,
+      displayName: asset.fileName,
+      duration: duration,
+      atTime: atTime,
+    );
+
+    if (clipId != null) {
+      // Seek to the clip's start so the preview panel shows the video
+      // immediately after adding it to the timeline.
+      notifier.seek(atTime);
+
+      // Refine duration in background if we used a fallback
+      if (asset.durationSeconds <= 0 && asset.type != MediaAssetType.image) {
+        notifier.probeMedia(asset.filePath).then((info) {
+          if (info != null && info.durationSeconds > 0.1) {
+            notifier.updateClipDuration(clipId, info.durationSeconds);
+          }
+        }).catchError((_) {});
+      }
+
+      if (asset.type == MediaAssetType.video) {
+        notifier.generateProxyForClip(clipId);
+      }
     }
   }
 
@@ -801,9 +943,14 @@ class _TimelinePanelState extends ConsumerState<TimelinePanel> {
 }
 
 String _formatTime(double s) {
-  final m = (s / 60).floor();
-  final sec = (s % 60).floor();
+  final totalSec = s.floor();
+  final h = totalSec ~/ 3600;
+  final m = (totalSec % 3600) ~/ 60;
+  final sec = totalSec % 60;
   final frames = ((s % 1) * 30).floor();
+  if (h > 0) {
+    return '$h:${m.toString().padLeft(2, '0')}:${sec.toString().padLeft(2, '0')}.${frames.toString().padLeft(2, '0')}';
+  }
   return '${m.toString().padLeft(2, '0')}:${sec.toString().padLeft(2, '0')}.${frames.toString().padLeft(2, '0')}';
 }
 
@@ -885,12 +1032,26 @@ class _TimelineToolbar extends ConsumerWidget {
           _miniBtn(Icons.remove_rounded, 'Zoom out (Cmd+-)', notifier.zoomOut),
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 5),
-            child: Text('${pxPerSec.round()}',
+            child: Text(pxPerSec >= 1 ? '${pxPerSec.round()}' : pxPerSec.toStringAsFixed(1),
               style: const TextStyle(fontSize: 12, color: Color(0xFF6B6B88), fontFamily: 'monospace')),
           ),
           _miniBtn(Icons.add_rounded, 'Zoom in (Cmd++)', notifier.zoomIn),
-          _miniBtn(Icons.fit_screen_rounded, 'Fit',
-            duration > 0 ? () => notifier.setZoom(MediaQuery.of(context).size.width * 0.5 / duration) : null,
+          _miniBtn(Icons.fit_screen_rounded, 'Fit all clips & re-enable auto-fit',
+            duration > 0 ? () {
+              // Use the actual rendered width of the toolbar's parent as a proxy
+              // for the timeline viewport width, minus the track header.
+              final box = context.findRenderObject() as RenderBox?;
+              final availableWidth = (box?.size.width ?? MediaQuery.of(context).size.width) - kTrackHeaderWidth;
+              notifier.resetAutoFit(availableWidth);
+            } : null,
+          ),
+          Container(width: 1, height: 24, margin: const EdgeInsets.symmetric(horizontal: 4), color: const Color(0xFF252540)),
+          // Track height: shrink / expand (via layout notifier)
+          _miniBtn(Icons.unfold_less_rounded, 'Collapse tracks',
+            () => ref.read(editorLayoutProvider.notifier).setAllTrackHeights(kLayoutMinTrackHeight),
+          ),
+          _miniBtn(Icons.unfold_more_rounded, 'Expand tracks',
+            () => ref.read(editorLayoutProvider.notifier).setAllTrackHeights(kLayoutMaxTrackHeight),
           ),
         ],
       ),

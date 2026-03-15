@@ -473,5 +473,161 @@ bool TimelineModel::reorder_tracks(const std::vector<int32_t>& new_order) {
     return true;
 }
 
+// =========================================================================
+// Phase 7: Extended clip engine operations
+// =========================================================================
+
+bool TimelineModel::move_multiple_clips(const std::vector<int32_t>& clip_ids,
+                                         double delta_time, int32_t delta_track) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    // Gather clip pointers first, validate all exist.
+    std::vector<Clip*> clips;
+    clips.reserve(clip_ids.size());
+    for (int32_t id : clip_ids) {
+        Clip* c = find_clip(id);
+        if (!c) return false;
+        clips.push_back(c);
+    }
+
+    // Apply deltas.
+    for (Clip* c : clips) {
+        c->timeline_range.in_time += delta_time;
+        c->timeline_range.out_time += delta_time;
+
+        if (delta_track != 0) {
+            int32_t new_track = c->track_index + delta_track;
+            if (new_track < 0 || new_track >= static_cast<int32_t>(tracks_.size())) continue;
+
+            // Remove from old track.
+            auto& old_clips = tracks_[static_cast<size_t>(c->track_index)].clips;
+            Clip copy = *c;
+            copy.track_index = new_track;
+            old_clips.erase(
+                std::remove_if(old_clips.begin(), old_clips.end(),
+                    [c](const Clip& cl) { return cl.id == c->id; }),
+                old_clips.end());
+
+            // Insert into new track.
+            tracks_[static_cast<size_t>(new_track)].clips.push_back(std::move(copy));
+        }
+    }
+    return true;
+}
+
+bool TimelineModel::swap_clips(int32_t clip_id_a, int32_t clip_id_b) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    Clip* a = find_clip(clip_id_a);
+    Clip* b = find_clip(clip_id_b);
+    if (!a || !b) return false;
+
+    // Swap timeline positions, keep source content intact.
+    std::swap(a->timeline_range, b->timeline_range);
+    std::swap(a->track_index, b->track_index);
+    return true;
+}
+
+int32_t TimelineModel::split_all_tracks(double split_time) {
+    // Don't lock here — split_clip acquires the lock internally per call.
+    // Collect clip IDs first, then split each.
+    std::vector<int32_t> to_split;
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        for (const auto& track : tracks_) {
+            for (const auto& clip : track.clips) {
+                if (split_time > clip.timeline_range.in_time + 0.001 &&
+                    split_time < clip.timeline_range.out_time - 0.001) {
+                    to_split.push_back(clip.id);
+                }
+            }
+        }
+    }
+
+    int32_t count = 0;
+    for (int32_t id : to_split) {
+        if (split_clip(id, split_time) >= 0) ++count;
+    }
+    return count;
+}
+
+bool TimelineModel::lift_delete(int32_t track_index, double range_start, double range_end) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    auto* track = track_at(track_index);
+    if (!track) return false;
+
+    const size_t before = track->clips.size();
+    track->clips.erase(
+        std::remove_if(track->clips.begin(), track->clips.end(),
+            [range_start, range_end](const Clip& c) {
+                return c.timeline_range.in_time >= range_start &&
+                       c.timeline_range.out_time <= range_end;
+            }),
+        track->clips.end());
+    // Note: no shifting — gap remains (lift vs ripple).
+    return track->clips.size() != before;
+}
+
+int32_t TimelineModel::check_overlap(int32_t track_index, double in_time,
+                                      double out_time, int32_t exclude_clip_id) const {
+    const Track* track = track_at(track_index);
+    if (!track) return 0; // CLEAR
+
+    constexpr double eps = 0.001;
+    bool has_adjacent = false;
+
+    for (const auto& clip : track->clips) {
+        if (clip.id == exclude_clip_id) continue;
+        const double ci = clip.timeline_range.in_time;
+        const double co = clip.timeline_range.out_time;
+
+        // Check overlap (intervals intersect if ci < out_time && co > in_time).
+        if (ci < out_time - eps && co > in_time + eps) {
+            return 1; // OVERLAP
+        }
+        // Check adjacency.
+        if (std::abs(ci - out_time) < eps || std::abs(co - in_time) < eps) {
+            has_adjacent = true;
+        }
+    }
+    return has_adjacent ? 2 : 0; // ADJACENT or CLEAR
+}
+
+std::vector<int32_t> TimelineModel::get_overlapping_clips(int32_t track_index,
+                                                           double in_time, double out_time) const {
+    std::vector<int32_t> result;
+    const Track* track = track_at(track_index);
+    if (!track) return result;
+
+    constexpr double eps = 0.001;
+    for (const auto& clip : track->clips) {
+        const double ci = clip.timeline_range.in_time;
+        const double co = clip.timeline_range.out_time;
+        if (ci < out_time - eps && co > in_time + eps) {
+            result.push_back(clip.id);
+        }
+    }
+    return result;
+}
+
+bool TimelineModel::set_track_sync_lock(int32_t track_index, bool locked) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    auto* track = track_at(track_index);
+    if (!track) return false;
+    track->sync_locked = locked;
+    return true;
+}
+
+bool TimelineModel::set_track_height(int32_t track_index, float height_px) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    auto* track = track_at(track_index);
+    if (!track) return false;
+    track->height = height_px;
+    return true;
+}
+
+float TimelineModel::get_track_height(int32_t track_index) const {
+    const auto* track = track_at(track_index);
+    return track ? track->height : 68.0f;
+}
+
 }  // namespace video
 }  // namespace gopost

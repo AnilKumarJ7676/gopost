@@ -1,5 +1,7 @@
 import 'dart:async';
+import 'dart:io';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:gopost_app/rendering_bridge/engine_api.dart';
 import 'package:gopost_app/rendering_bridge/video_engine_providers.dart';
@@ -32,6 +34,11 @@ final timelineNotifierProvider =
 enum TimelinePhase { idle, initializing, ready, error }
 enum BottomPanelTab { timeline, effects, colorGrading, transitions, keyframes, audio, text, inspector, transform, speed, markers, adjustmentLayers }
 
+/// Minimum / maximum track height for free resizing.
+const double kMinTrackHeight = 24.0;
+const double kMaxTrackHeight = 200.0;
+const double kDefaultTrackHeight = 68.0;
+
 class TimelineState {
   final TimelinePhase phase;
   final VideoProject? project;
@@ -39,11 +46,15 @@ class TimelineState {
   final int? selectedClipId;
   final double pixelsPerSecond;
   final double scrollOffset;
+  final double trackHeight;
   final String? errorMessage;
   final bool canUndo;
   final bool canRedo;
   final BottomPanelTab activePanel;
   final bool useProxyPlayback;
+  /// When true, the timeline automatically scales clips to fill the viewport.
+  /// Pinch-to-zoom or manual zoom disables this. "Fit All" re-enables it.
+  final bool autoFitEnabled;
 
   const TimelineState({
     this.phase = TimelinePhase.idle,
@@ -52,11 +63,13 @@ class TimelineState {
     this.selectedClipId,
     this.pixelsPerSecond = 80,
     this.scrollOffset = 0,
+    this.trackHeight = kDefaultTrackHeight,
     this.errorMessage,
     this.canUndo = false,
     this.canRedo = false,
     this.activePanel = BottomPanelTab.timeline,
     this.useProxyPlayback = true,
+    this.autoFitEnabled = true,
   });
 
   bool get isReady => phase == TimelinePhase.ready;
@@ -72,12 +85,14 @@ class TimelineState {
     bool clearSelection = false,
     double? pixelsPerSecond,
     double? scrollOffset,
+    double? trackHeight,
     String? errorMessage,
     bool clearError = false,
     bool? canUndo,
     bool? canRedo,
     BottomPanelTab? activePanel,
     bool? useProxyPlayback,
+    bool? autoFitEnabled,
   }) {
     return TimelineState(
       phase: phase ?? this.phase,
@@ -86,11 +101,13 @@ class TimelineState {
       selectedClipId: clearSelection ? null : (selectedClipId ?? this.selectedClipId),
       pixelsPerSecond: pixelsPerSecond ?? this.pixelsPerSecond,
       scrollOffset: scrollOffset ?? this.scrollOffset,
+      trackHeight: trackHeight ?? this.trackHeight,
       errorMessage: clearError ? null : (errorMessage ?? this.errorMessage),
       canUndo: canUndo ?? this.canUndo,
       canRedo: canRedo ?? this.canRedo,
       activePanel: activePanel ?? this.activePanel,
       useProxyPlayback: useProxyPlayback ?? this.useProxyPlayback,
+      autoFitEnabled: autoFitEnabled ?? this.autoFitEnabled,
     );
   }
 }
@@ -225,6 +242,9 @@ class TimelineNotifier extends StateNotifier<TimelineState>
     if (state.useProxyPlayback &&
         clip.proxyStatus == ProxyStatus.ready &&
         clip.proxyPath != null) {
+      // Trust proxy status at this level — synchronous path resolution
+      // cannot do async I/O. The caller (syncNativeToProject) validates
+      // file existence when it matters.
       return clip.proxyPath!;
     }
     return clip.sourcePath;
@@ -261,10 +281,23 @@ class TimelineNotifier extends StateNotifier<TimelineState>
 
     for (final clip in clipsOrdered) {
       try {
+        final playbackPath = resolvePlaybackPath(clip);
+        // Validate that the source file exists before sending to the engine.
+        // If a proxy was deleted or the original file moved, fall back to
+        // the raw source path so the clip isn't silently dropped.
+        String resolvedPath = playbackPath;
+        if (playbackPath != clip.sourcePath) {
+          final proxyFile = File(playbackPath);
+          if (!await proxyFile.exists()) {
+            debugPrint('[Timeline] Proxy missing for clip ${clip.id}, '
+                'falling back to source: ${clip.sourcePath}');
+            resolvedPath = clip.sourcePath;
+          }
+        }
         final newId = await _engine.addClip(tlId, ClipDescriptor(
           trackIndex: clip.trackIndex,
           sourceType: toEngineSourceType(clip.sourceType),
-          sourcePath: resolvePlaybackPath(clip),
+          sourcePath: resolvedPath,
           timelineRange: TimelineRange(inTime: clip.timelineIn, outTime: clip.timelineOut),
           sourceRange: SourceRange(sourceIn: clip.sourceIn, sourceOut: clip.sourceOut),
           speed: clip.speed,
@@ -273,7 +306,10 @@ class TimelineNotifier extends StateNotifier<TimelineState>
           effectHash: clip.effectHash,
         ));
         oldToNewClipId[clip.id] = newId;
-      } catch (_) {}
+      } catch (e) {
+        debugPrint('[Timeline] Failed to add clip ${clip.id} '
+            '(${clip.sourcePath}): $e');
+      }
     }
 
     final newTracks = target.tracks.map((t) {
@@ -580,10 +616,33 @@ class TimelineNotifier extends StateNotifier<TimelineState>
   void stepBackward() => _playback.stepBackward();
   void stepForwardN(int frames) => _playback.stepForwardN(frames);
   void stepBackwardN(int frames) => _playback.stepBackwardN(frames);
-  void setZoom(double pps) => _playback.setZoom(pps);
-  void zoomIn() => _playback.zoomIn();
-  void zoomOut() => _playback.zoomOut();
+  void setZoom(double pps) {
+    // Manual zoom disables auto-fit
+    state = state.copyWith(autoFitEnabled: false);
+    _playback.setZoom(pps);
+  }
+  void zoomIn() {
+    state = state.copyWith(autoFitEnabled: false);
+    _playback.zoomIn();
+  }
+  void zoomOut() {
+    state = state.copyWith(autoFitEnabled: false);
+    _playback.zoomOut();
+  }
+  void zoomToFit(double viewportWidth) => _playback.zoomToFit(viewportWidth);
+
+  /// Re-enable auto-fit and immediately zoom to fit.
+  void resetAutoFit(double viewportWidth) {
+    state = state.copyWith(autoFitEnabled: true);
+    _playback.zoomToFit(viewportWidth);
+  }
   void setScrollOffset(double offset) => _playback.setScrollOffset(offset);
+
+  void setTrackHeight(double height) {
+    state = state.copyWith(
+      trackHeight: height.clamp(kMinTrackHeight, kMaxTrackHeight),
+    );
+  }
 
   // JKL shuttle
   void shuttleForward() => _playback.shuttleForward();
@@ -651,7 +710,7 @@ class TimelineNotifier extends StateNotifier<TimelineState>
   Future<int?> splitClipAtPlayhead(int clipId) => _trackClip.splitClipAtPlayhead(clipId);
   Future<void> rippleDelete(int trackIndex, double rangeStart, double rangeEnd) => _trackClip.rippleDelete(trackIndex, rangeStart, rangeEnd);
   Future<void> closeTrackGaps(int trackIndex) => _trackClip.closeTrackGaps(trackIndex);
-  void selectClip(int? clipId) => _trackClip.selectClip(clipId);
+  Future<void> selectClip(int? clipId) => _trackClip.selectClip(clipId);
   VideoClip? get clipUnderPlayhead => _trackClip.clipUnderPlayhead;
   int? ensureClipSelected() => _trackClip.ensureClipSelected();
 
@@ -701,6 +760,54 @@ class TimelineNotifier extends StateNotifier<TimelineState>
   void setTrackVolume(int trackIndex, double volume) => _keyframeAudio.setTrackVolume(trackIndex, volume);
   void setTrackPan(int trackIndex, double pan) => _keyframeAudio.setTrackPan(trackIndex, pan);
   Future<MediaInfo?> probeMedia(String filePath) => _keyframeAudio.probeMedia(filePath);
+  Future<MediaInfo?> probeMediaFast(String filePath) => _keyframeAudio.probeMediaFast(filePath);
+
+  /// Update a clip's duration after a background probe refines the value.
+  /// Adjusts the timeline-out, source-out, and engine clip in-place.
+  Future<void> updateClipDuration(int clipId, double newDuration) async {
+    final project = state.project;
+    if (project == null) return;
+    final clip = project.findClip(clipId);
+    if (clip == null) return;
+    // Only update if the difference is meaningful (> 0.5 s).
+    final currentDuration = clip.timelineOut - clip.timelineIn;
+    if ((newDuration - currentDuration).abs() < 0.5) return;
+
+    final newOut = clip.timelineIn + newDuration;
+    final newSourceOut = newDuration;
+
+    // Update engine
+    try {
+      await _engine.trimClip(
+        project.timelineId,
+        clipId,
+        TimelineRange(inTime: clip.timelineIn, outTime: newOut),
+        SourceRange(sourceIn: clip.sourceIn, sourceOut: newSourceOut),
+      );
+    } catch (_) {}
+
+    // Update state
+    final updatedTracks = project.tracks.map((t) {
+      return t.copyWith(
+        clips: t.clips.map((c) {
+          if (c.id == clipId) {
+            return c.copyWith(
+              timelineOut: newOut,
+              sourceOut: newSourceOut,
+            );
+          }
+          return c;
+        }).toList(),
+      );
+    }).toList();
+
+    state = state.copyWith(
+      project: project.copyWith(tracks: updatedTracks),
+      playback: state.playback.copyWith(
+        durationSeconds: newOut > state.playback.durationSeconds ? newOut : null,
+      ),
+    );
+  }
 
   // =========================================================================
   // Delegated: Advanced editing

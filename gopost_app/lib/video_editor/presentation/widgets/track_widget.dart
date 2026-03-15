@@ -7,6 +7,8 @@ import 'package:gopost_app/video_editor/domain/models/video_project.dart';
 import 'package:gopost_app/video_editor/domain/models/video_transition.dart';
 import 'package:gopost_app/video_editor/presentation/widgets/clip_widget.dart';
 
+/// Default track height — now dynamically overridden by [TimelineState.trackHeight].
+/// Keep as a fallback for widgets that don't receive the dynamic value.
 const double kTrackHeight = 68;
 const double kTrackHeaderWidth = 96;
 
@@ -30,6 +32,7 @@ class TrackHeader extends StatelessWidget {
   const TrackHeader({
     super.key,
     required this.track,
+    this.height = kTrackHeight,
     this.onToggleVisibility,
     this.onToggleLock,
     this.onToggleMute,
@@ -38,6 +41,7 @@ class TrackHeader extends StatelessWidget {
   });
 
   final VideoTrack track;
+  final double height;
   final VoidCallback? onToggleVisibility;
   final VoidCallback? onToggleLock;
   final VoidCallback? onToggleMute;
@@ -53,7 +57,7 @@ class TrackHeader extends StatelessWidget {
       onLongPress: onRemove,
       child: Container(
         width: kTrackHeaderWidth,
-        height: kTrackHeight,
+        height: height,
         decoration: BoxDecoration(
           color: const Color(0xFF14142B),
           border: Border(
@@ -61,56 +65,65 @@ class TrackHeader extends StatelessWidget {
             bottom: const BorderSide(color: Color(0xFF1E1E38), width: 1),
           ),
         ),
+        clipBehavior: Clip.hardEdge,
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
+          mainAxisSize: MainAxisSize.min,
           children: [
             Row(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
                 Icon(icon, size: 16, color: accent),
                 const SizedBox(width: 5),
-                Text(
-                  track.label,
-                  style: TextStyle(
-                    fontSize: 13,
-                    fontWeight: FontWeight.w600,
-                    color: accent,
+                Flexible(
+                  child: Text(
+                    track.label,
+                    style: TextStyle(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w600,
+                      color: accent,
+                    ),
+                    overflow: TextOverflow.ellipsis,
+                    maxLines: 1,
                   ),
                 ),
               ],
             ),
-            const SizedBox(height: 4),
-            Row(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                _tinyToggle(
-                  icon: track.isVisible ? Icons.visibility_rounded : Icons.visibility_off_rounded,
-                  active: track.isVisible,
-                  onTap: onToggleVisibility,
-                  activeColor: const Color(0xFF8888A0),
-                ),
-                _tinyToggle(
-                  icon: track.isLocked ? Icons.lock_rounded : Icons.lock_open_rounded,
-                  active: track.isLocked,
-                  onTap: onToggleLock,
-                  activeColor: const Color(0xFFEF5350),
-                ),
-                if (track.type == TrackType.audio || track.type == TrackType.video)
+            if (height > 40) const SizedBox(height: 4),
+            if (height > 40)
+              Wrap(
+                alignment: WrapAlignment.center,
+                spacing: 0,
+                runSpacing: 2,
+                children: [
                   _tinyToggle(
-                    icon: track.isMuted ? Icons.volume_off_rounded : Icons.volume_up_rounded,
-                    active: !track.isMuted,
-                    onTap: onToggleMute,
+                    icon: track.isVisible ? Icons.visibility_rounded : Icons.visibility_off_rounded,
+                    active: track.isVisible,
+                    onTap: onToggleVisibility,
                     activeColor: const Color(0xFF8888A0),
                   ),
-                if (track.type == TrackType.audio || track.type == TrackType.video)
                   _tinyToggle(
-                    icon: Icons.headphones_rounded,
-                    active: track.isSolo,
-                    onTap: onToggleSolo,
-                    activeColor: const Color(0xFFFFCA28),
+                    icon: track.isLocked ? Icons.lock_rounded : Icons.lock_open_rounded,
+                    active: track.isLocked,
+                    onTap: onToggleLock,
+                    activeColor: const Color(0xFFEF5350),
                   ),
-              ],
-            ),
+                  if (track.type == TrackType.audio || track.type == TrackType.video)
+                    _tinyToggle(
+                      icon: track.isMuted ? Icons.volume_off_rounded : Icons.volume_up_rounded,
+                      active: !track.isMuted,
+                      onTap: onToggleMute,
+                      activeColor: const Color(0xFF8888A0),
+                    ),
+                  if (track.type == TrackType.audio || track.type == TrackType.video)
+                    _tinyToggle(
+                      icon: Icons.headphones_rounded,
+                      active: track.isSolo,
+                      onTap: onToggleSolo,
+                      activeColor: const Color(0xFFFFCA28),
+                    ),
+                ],
+              ),
           ],
         ),
       ),
@@ -145,6 +158,7 @@ class TrackLane extends StatelessWidget {
     required this.totalWidth,
     required this.selectedClipId,
     required this.onClipTap,
+    this.trackHeight = kTrackHeight,
     this.previewFrame,
     this.playheadPosition = 0,
     this.onClipDragUpdate,
@@ -161,6 +175,7 @@ class TrackLane extends StatelessWidget {
   final double pixelsPerSecond;
   final double totalWidth;
   final int? selectedClipId;
+  final double trackHeight;
   final ui.Image? previewFrame;
   final double playheadPosition;
   final ValueChanged<int> onClipTap;
@@ -181,7 +196,7 @@ class TrackLane extends StatelessWidget {
       ..sort((a, b) => a.timelineIn.compareTo(b.timelineIn));
 
     Widget content = Container(
-      height: kTrackHeight,
+      height: trackHeight,
       width: totalWidth,
       decoration: BoxDecoration(
         color: accent.withValues(alpha: 0.04),
@@ -198,7 +213,7 @@ class TrackLane extends StatelessWidget {
               key: ValueKey('clip_${clip.id}'),
               left: clip.timelineIn * pixelsPerSecond,
               top: 0,
-              height: kTrackHeight - 1,
+              height: trackHeight - 1,
               child: RepaintBoundary(
                 child: _ClipDropTarget(
                   clipId: clip.id,
@@ -260,7 +275,7 @@ class TrackLane extends StatelessWidget {
       left: leftEdge,
       top: 0,
       width: zoneW,
-      height: kTrackHeight - 1,
+      height: trackHeight - 1,
       child: _TransitionZone(
         leftClipId: left.id,
         rightClipId: right.id,
@@ -298,7 +313,11 @@ class _ClipDropTargetState extends State<_ClipDropTarget> {
   @override
   Widget build(BuildContext context) {
     return DragTarget<TimelineDragData>(
-      onWillAcceptWithDetails: (_) {
+      onWillAcceptWithDetails: (details) {
+        // Only accept effect/transition/preset/adjustment drops on clips.
+        // MediaAssetDragData must fall through to the background drop target
+        // which handles adding new clips to the timeline.
+        if (details.data is MediaAssetDragData) return false;
         if (!_hovering) setState(() => _hovering = true);
         return true;
       },

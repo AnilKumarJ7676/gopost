@@ -7,6 +7,7 @@
 #include "video_compositor.hpp"
 #include "media_probe.hpp"
 #include "audio_mixer.hpp"
+#include "decoder_pool.hpp"
 #include <algorithm>
 #include <cmath>
 #include <cstring>
@@ -22,6 +23,7 @@ struct GopostTimeline {
     std::unique_ptr<gopost::video::FrameCache> frame_cache;
     std::unique_ptr<gopost::video::TimelineEvaluator> evaluator;
     std::unique_ptr<gopost::video::AudioMixer> audio_mixer;
+    gopost::video::DecoderPool* decoder_pool = nullptr;  // Non-owning; set externally
     size_t frame_cache_max_bytes = kDefaultFrameCacheBytes;
 };
 
@@ -844,6 +846,114 @@ GopostError gopost_timeline_switch_multicam_angle(
 GopostError gopost_timeline_flatten_multicam(
     GopostTimeline* timeline, int32_t clip_id) {
     (void)timeline; (void)clip_id;
+    return GOPOST_OK;
+}
+
+/* =========================================================================
+   Phase 7: Extended Clip Engine
+   ========================================================================= */
+
+GopostError gopost_timeline_move_multiple_clips(
+    GopostTimeline* timeline,
+    const int32_t* clip_ids, int32_t count,
+    double delta_time, int32_t delta_track) {
+    if (!timeline || !clip_ids || count <= 0) return GOPOST_ERROR_INVALID_ARGUMENT;
+    std::vector<int32_t> ids(clip_ids, clip_ids + count);
+    if (!timeline->model->move_multiple_clips(ids, delta_time, delta_track)) {
+        return GOPOST_ERROR_INVALID_ARGUMENT;
+    }
+    timeline->frame_cache->invalidate_all();
+    return GOPOST_OK;
+}
+
+GopostError gopost_timeline_swap_clips(
+    GopostTimeline* timeline,
+    int32_t clip_id_a, int32_t clip_id_b) {
+    if (!timeline) return GOPOST_ERROR_INVALID_ARGUMENT;
+    if (!timeline->model->swap_clips(clip_id_a, clip_id_b)) {
+        return GOPOST_ERROR_INVALID_ARGUMENT;
+    }
+    timeline->frame_cache->invalidate_all();
+    return GOPOST_OK;
+}
+
+GopostError gopost_timeline_split_all_tracks(
+    GopostTimeline* timeline,
+    double split_time_seconds,
+    int32_t* out_new_clip_count) {
+    if (!timeline || !out_new_clip_count) return GOPOST_ERROR_INVALID_ARGUMENT;
+    *out_new_clip_count = timeline->model->split_all_tracks(split_time_seconds);
+    timeline->frame_cache->invalidate_all();
+    return GOPOST_OK;
+}
+
+GopostError gopost_timeline_lift_delete(
+    GopostTimeline* timeline,
+    int32_t track_index,
+    double range_start_seconds,
+    double range_end_seconds) {
+    if (!timeline) return GOPOST_ERROR_INVALID_ARGUMENT;
+    if (!timeline->model->lift_delete(track_index, range_start_seconds, range_end_seconds)) {
+        return GOPOST_ERROR_INVALID_ARGUMENT;
+    }
+    timeline->frame_cache->invalidate_all();
+    return GOPOST_OK;
+}
+
+GopostError gopost_timeline_check_overlap(
+    GopostTimeline* timeline,
+    int32_t track_index,
+    double in_time, double out_time,
+    int32_t exclude_clip_id,
+    int32_t* out_result) {
+    if (!timeline || !out_result) return GOPOST_ERROR_INVALID_ARGUMENT;
+    *out_result = timeline->model->check_overlap(track_index, in_time, out_time, exclude_clip_id);
+    return GOPOST_OK;
+}
+
+GopostError gopost_timeline_get_overlapping_clips(
+    GopostTimeline* timeline,
+    int32_t track_index,
+    double in_time, double out_time,
+    int32_t* out_clip_ids, int32_t max_ids,
+    int32_t* out_count) {
+    if (!timeline || !out_clip_ids || !out_count || max_ids < 0) return GOPOST_ERROR_INVALID_ARGUMENT;
+    auto ids = timeline->model->get_overlapping_clips(track_index, in_time, out_time);
+    *out_count = static_cast<int32_t>(std::min(static_cast<size_t>(max_ids), ids.size()));
+    for (int32_t i = 0; i < *out_count; ++i) {
+        out_clip_ids[i] = ids[static_cast<size_t>(i)];
+    }
+    return GOPOST_OK;
+}
+
+GopostError gopost_timeline_set_track_sync_lock(
+    GopostTimeline* timeline,
+    int32_t track_index,
+    int32_t locked) {
+    if (!timeline) return GOPOST_ERROR_INVALID_ARGUMENT;
+    if (!timeline->model->set_track_sync_lock(track_index, locked != 0)) {
+        return GOPOST_ERROR_INVALID_ARGUMENT;
+    }
+    return GOPOST_OK;
+}
+
+GopostError gopost_timeline_set_track_height(
+    GopostTimeline* timeline,
+    int32_t track_index,
+    float height_px) {
+    if (!timeline) return GOPOST_ERROR_INVALID_ARGUMENT;
+    if (!timeline->model->set_track_height(track_index, height_px)) {
+        return GOPOST_ERROR_INVALID_ARGUMENT;
+    }
+    return GOPOST_OK;
+}
+
+GopostError gopost_timeline_get_track_height(
+    const GopostTimeline* timeline,
+    int32_t track_index,
+    float* out_height_px) {
+    if (!timeline || !out_height_px) return GOPOST_ERROR_INVALID_ARGUMENT;
+    *out_height_px = timeline->model->get_track_height(track_index);
     return GOPOST_OK;
 }
 

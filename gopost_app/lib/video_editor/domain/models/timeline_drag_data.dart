@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'media_asset.dart';
 import 'video_effect.dart';
 import 'video_transition.dart';
 
@@ -44,4 +45,10 @@ class PresetClipDragData extends TimelineDragData {
     required this.preset,
     this.icon = Icons.filter,
   });
+}
+
+/// Dragged from the Media Pool onto the timeline.
+class MediaAssetDragData extends TimelineDragData {
+  final MediaAsset asset;
+  const MediaAssetDragData({required this.asset});
 }

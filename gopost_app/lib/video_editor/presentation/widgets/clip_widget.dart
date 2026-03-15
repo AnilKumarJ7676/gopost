@@ -84,7 +84,7 @@ class _ClipWidgetState extends ConsumerState<ClipWidget> {
 
   int get _thumbCount {
     final clipPx = widget.clip.duration * widget.pixelsPerSecond;
-    return (clipPx / _kThumbWidth).ceil().clamp(1, 20);
+    return (clipPx / _kThumbWidth).ceil().clamp(1, 40);
   }
 
   @override
@@ -342,7 +342,7 @@ class _ClipWidgetState extends ConsumerState<ClipWidget> {
 // Thumbnail strip widgets — fetched via Riverpod
 // ---------------------------------------------------------------------------
 
-class _VideoThumbnailStrip extends ConsumerWidget {
+class _VideoThumbnailStrip extends ConsumerStatefulWidget {
   const _VideoThumbnailStrip({
     required this.sourcePath,
     required this.sourceDuration,
@@ -356,17 +356,53 @@ class _VideoThumbnailStrip extends ConsumerWidget {
   final Color color;
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<_VideoThumbnailStrip> createState() => _VideoThumbnailStripState();
+}
+
+class _VideoThumbnailStripState extends ConsumerState<_VideoThumbnailStrip> {
+  /// Debounce the thumb count so rapid zoom changes don't keep restarting
+  /// FFmpeg extractions. We lock in the count on first build and only update
+  /// it if the new count persists across rebuilds.
+  late int _stableThumbCount;
+  int? _pendingThumbCount;
+
+  @override
+  void initState() {
+    super.initState();
+    _stableThumbCount = widget.thumbCount;
+  }
+
+  @override
+  void didUpdateWidget(covariant _VideoThumbnailStrip old) {
+    super.didUpdateWidget(old);
+    if (widget.thumbCount != _stableThumbCount) {
+      // Thumb count changed (zoom). Accept it after a brief stabilization.
+      if (_pendingThumbCount != widget.thumbCount) {
+        _pendingThumbCount = widget.thumbCount;
+        Future.delayed(const Duration(milliseconds: 300), () {
+          if (mounted && _pendingThumbCount == widget.thumbCount) {
+            setState(() {
+              _stableThumbCount = widget.thumbCount;
+              _pendingThumbCount = null;
+            });
+          }
+        });
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
     final request = ClipThumbRequest(
-      sourcePath: sourcePath,
-      sourceDuration: sourceDuration,
-      count: thumbCount,
+      sourcePath: widget.sourcePath,
+      sourceDuration: widget.sourceDuration,
+      count: _stableThumbCount,
     );
     final thumbsAsync = ref.watch(clipThumbnailsProvider(request));
 
     return thumbsAsync.when(
       data: (thumbs) {
-        if (thumbs.isEmpty) return _placeholder(color);
+        if (thumbs.isEmpty) return _placeholder(widget.color);
         return Row(
           children: [
             for (int i = 0; i < thumbs.length; i++)
@@ -376,23 +412,19 @@ class _VideoThumbnailStrip extends ConsumerWidget {
                   fit: BoxFit.cover,
                   height: double.infinity,
                   gaplessPlayback: true,
-                  errorBuilder: (_, __, ___) => Container(color: color.withValues(alpha: 0.15)),
+                  errorBuilder: (_, __, ___) => Container(color: widget.color.withValues(alpha: 0.15)),
                 ),
               ),
           ],
         );
       },
-      loading: () => _shimmer(color),
-      error: (_, __) => _placeholder(color),
+      loading: () => _ThumbnailShimmer(color: widget.color),
+      error: (_, __) => _placeholder(widget.color),
     );
   }
 
   static Widget _placeholder(Color color) {
     return Container(color: color.withValues(alpha: 0.15));
-  }
-
-  static Widget _shimmer(Color color) {
-    return _ThumbnailShimmer(color: color);
   }
 }
 

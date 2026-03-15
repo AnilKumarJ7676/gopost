@@ -54,6 +54,11 @@ class _VideoPreviewPanelState extends ConsumerState<VideoPreviewPanel> {
   bool _isSyncing = false;
   bool _pendingSync = false;
   bool _isOpeningSource = false;
+  /// Monotonically increasing counter to detect stale open operations.
+  int _openGeneration = 0;
+  /// Path queued while another open was in progress. Processed after the
+  /// current open completes so clip clicks are never silently dropped.
+  String? _queuedPath;
 
   // Cached color matrix to avoid recomputing on every playback tick.
   int? _cachedClipId;
@@ -85,7 +90,13 @@ class _VideoPreviewPanelState extends ConsumerState<VideoPreviewPanel> {
     _initPlayers();
 
     if (path == _activePath && _activeReady) return;
-    if (_isOpeningSource) return;
+
+    // If another source is being opened, queue this path instead of dropping
+    // it. The queued path will be processed once the current open finishes.
+    if (_isOpeningSource) {
+      _queuedPath = path;
+      return;
+    }
 
     // If standby already has this path ready, just swap.
     final standbyPath = _aIsActive ? _pathB : _pathA;
@@ -99,59 +110,74 @@ class _VideoPreviewPanelState extends ConsumerState<VideoPreviewPanel> {
       return;
     }
 
-    // First clip ever: load directly on the active player.
-    if (_activePath == null && !_activeReady) {
-      _isOpeningSource = true;
-      if (_aIsActive) { _pathA = path; } else { _pathB = path; }
-      try {
-        await (_aIsActive ? _playerA! : _playerB!).open(Media(path), play: false);
-        if (_aIsActive) { _readyA = true; } else { _readyB = true; }
-        if (mounted) {
-          _syncPlayback(ref.read(timelineNotifierProvider));
-          setState(() {});
-        }
-      } catch (_) {
-        if (_aIsActive) { _pathA = null; _readyA = false; }
-        else { _pathB = null; _readyB = false; }
-      } finally {
-        _isOpeningSource = false;
-      }
-      return;
-    }
+    // Capture generation so we can detect if a newer open superseded us.
+    final gen = ++_openGeneration;
 
-    // Normal case: load on the standby player, then swap.
+    // Pick the player to load on.  For the first clip, use the active player.
+    // For subsequent clips, use the standby player and swap after load.
+    final bool isFirstLoad = _activePath == null && !_activeReady;
+    final bool loadOnA = isFirstLoad ? _aIsActive : !_aIsActive;
+    final player = loadOnA ? _playerA! : _playerB!;
+
     _isOpeningSource = true;
-    final standbyPlayer = _aIsActive ? _playerB! : _playerA!;
-    if (_aIsActive) { _pathB = path; } else { _pathA = path; }
+    // Clear stale ready state BEFORE starting the async open.  This prevents
+    // the standby from being considered "ready" with an old source if a
+    // previous load set it.
+    if (loadOnA) { _pathA = path; _readyA = false; }
+    else { _pathB = path; _readyB = false; }
+
     try {
-      await standbyPlayer.open(Media(path), play: false);
-      if (_aIsActive) { _readyB = true; } else { _readyA = true; }
-      _aIsActive = !_aIsActive;
+      await player.open(Media(path), play: false);
+      // Await seek so the first frame is fully decoded before we mark
+      // the player ready. This prevents blank screens on slow-loading
+      // codecs or large files.
+      await player.seek(Duration.zero);
+      // Give the video texture one frame to update.  media_kit's seek
+      // future resolves when the command is sent to mpv, but the texture
+      // may not have the decoded frame yet.
+      await Future<void>.delayed(const Duration(milliseconds: 50));
+      if (gen != _openGeneration || !mounted) return; // superseded
+
+      if (loadOnA) { _readyA = true; } else { _readyB = true; }
+      if (!isFirstLoad) _aIsActive = loadOnA;
       if (mounted) {
         _syncPlayback(ref.read(timelineNotifierProvider));
         setState(() {});
       }
-    } catch (_) {
-      if (_aIsActive) { _pathB = null; _readyB = false; }
-      else { _pathA = null; _readyA = false; }
+    } catch (e) {
+      debugPrint('[VideoPreview] Failed to open $path: $e');
+      if (loadOnA) { _pathA = null; _readyA = false; }
+      else { _pathB = null; _readyB = false; }
+
+      // If we failed to open a proxy path, fall back to the original source.
+      if (mounted) {
+        final state = ref.read(timelineNotifierProvider);
+        final project = state.project;
+        if (project != null) {
+          final clip = _findVideoClipAtPosition(project, state.playback.positionSeconds);
+          if (clip != null && clip.proxyPath == path && clip.sourcePath != path) {
+            debugPrint('[VideoPreview] Proxy failed, falling back to source: ${clip.sourcePath}');
+            _queuedPath = clip.sourcePath;
+          }
+        }
+      }
     } finally {
       _isOpeningSource = false;
+      _drainQueuedPath();
     }
   }
 
-  void _disposeController() {
-    _playerA?.dispose();
-    _playerB?.dispose();
-    _playerA = null;
-    _playerB = null;
-    _controllerA = null;
-    _controllerB = null;
-    _pathA = null;
-    _pathB = null;
-    _readyA = false;
-    _readyB = false;
-    _aIsActive = true;
-    _isOpeningSource = false;
+  /// Process any path that was queued while a source was being opened.
+  void _drainQueuedPath() {
+    final queued = _queuedPath;
+    if (queued == null || !mounted) return;
+    _queuedPath = null;
+    // Use the latest timeline state after the controller is ready, not the
+    // state captured before the async open started.
+    _ensureController(queued).then((_) {
+      if (!mounted) return;
+      _syncPlayback(ref.read(timelineNotifierProvider));
+    });
   }
 
   VideoClip? _findVideoClipAtPosition(VideoProject project, double pos) {
@@ -183,7 +209,7 @@ class _VideoPreviewPanelState extends ConsumerState<VideoPreviewPanel> {
   void _syncPlayback(TimelineState state) {
     final player = _activePlayer;
     if (player == null || !_activeReady) return;
-    if (_isSyncing || _isOpeningSource) return;
+    if (_isSyncing) return;
     _isSyncing = true;
 
     final project = state.project;
@@ -192,10 +218,18 @@ class _VideoPreviewPanelState extends ConsumerState<VideoPreviewPanel> {
     final pos = state.playback.positionSeconds;
     final activeClip = _findVideoClipAtPosition(project, pos);
 
-    final clipPlaybackPath = activeClip != null
-        ? (activeClip.hasProxy ? activeClip.proxyPath : activeClip.sourcePath)
-        : null;
-    if (activeClip != null && (clipPlaybackPath == _activePath || activeClip.sourcePath == _activePath)) {
+    // Match clip path against what is loaded in the player.  Accept either
+    // the resolved proxy path or the raw source path — they refer to the
+    // same logical clip.
+    final bool pathMatch;
+    if (activeClip != null && _activePath != null) {
+      pathMatch = activeClip.sourcePath == _activePath ||
+          (activeClip.hasProxy && activeClip.proxyPath == _activePath);
+    } else {
+      pathMatch = false;
+    }
+
+    if (activeClip != null && pathMatch) {
       final clipLocal = pos - activeClip.timelineIn;
       final clipDuration = activeClip.timelineOut - activeClip.timelineIn;
       final speedTrack = activeClip.keyframes.trackFor(KeyframeProperty.speed);
@@ -220,8 +254,6 @@ class _VideoPreviewPanelState extends ConsumerState<VideoPreviewPanel> {
 
       if (state.playback.isPlaying) {
         if (isFreeze || activeClip.speed < 0) {
-          // Freeze clips and reversed clips: keep the player paused and
-          // seek to the computed source position on every tick.
           if (player.state.playing) player.pause();
           player.seek(Duration(milliseconds: seekMs));
         } else if (hasSpeedRamp) {
@@ -247,10 +279,7 @@ class _VideoPreviewPanelState extends ConsumerState<VideoPreviewPanel> {
         }
       } else {
         if (player.state.playing) player.pause();
-        final vpPos = player.state.position.inMilliseconds / 1000.0;
-        if ((vpPos - clampedSource).abs() > 0.03) {
-          player.seek(Duration(milliseconds: seekMs));
-        }
+        player.seek(Duration(milliseconds: seekMs));
       }
 
       double vol = activeClip.audio.isMuted ? 0.0 : activeClip.audio.volume;
@@ -264,6 +293,12 @@ class _VideoPreviewPanelState extends ConsumerState<VideoPreviewPanel> {
         vol *= (clipDuration - clipLocal) / activeClip.audio.fadeOutSeconds;
       }
       player.setVolume(vol.clamp(0.0, 1.0) * 100.0);
+    } else if (activeClip != null && !pathMatch) {
+      // Clip exists at the playhead but its path doesn't match the loaded
+      // player source.  Pause the current player and let the build method
+      // trigger _ensureController for the correct source.  Playing the
+      // wrong source would show the wrong video/audio.
+      if (player.state.playing) player.pause();
     } else if (!state.playback.isPlaying) {
       if (player.state.playing) player.pause();
     }
@@ -313,8 +348,11 @@ class _VideoPreviewPanelState extends ConsumerState<VideoPreviewPanel> {
         videoPath = (useProxy && clip.hasProxy) ? clip.proxyPath : clip.sourcePath;
       }
     }
-
-    if (!_pendingSync) {
+    // During playback we must sync every frame so the player stays in lock
+    // with the timeline position.  When paused we throttle via _pendingSync
+    // to avoid redundant work.
+    final shouldSync = isPlaying || !_pendingSync;
+    if (shouldSync) {
       _pendingSync = true;
       WidgetsBinding.instance.addPostFrameCallback((_) {
         _pendingSync = false;
@@ -323,12 +361,13 @@ class _VideoPreviewPanelState extends ConsumerState<VideoPreviewPanel> {
           _ensureController(videoPath).then((_) {
             if (!mounted) return;
             final latestState = ref.read(timelineNotifierProvider);
-            // Always sync: reversed clips need per-tick seeking, and forward
-            // clips benefit from timely rate/volume updates.
             _syncPlayback(latestState);
           });
         } else if (_activePath != null && !isPlaying) {
-          _disposeController();
+          // At a gap between clips while paused — keep showing the last
+          // decoded frame instead of going black.
+          final p = _activePlayer;
+          if (p != null && p.state.playing) p.pause();
         }
       });
     }

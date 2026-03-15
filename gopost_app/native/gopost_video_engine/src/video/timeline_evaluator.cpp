@@ -26,12 +26,47 @@ TimelineEvaluator::TimelineEvaluator(GopostEngine* engine,
     , model_(model)
     , frame_cache_(frame_cache) {}
 
+TimelineEvaluator::~TimelineEvaluator() {
+    release_all_leases();
+}
+
 GopostVideoBlendMode TimelineEvaluator::to_blend_mode(int32_t mode) const {
     return blend_mode_from_int(mode);
 }
 
+void TimelineEvaluator::set_decoder_pool(DecoderPool* pool) {
+    release_all_leases();
+    decoder_pool_ = pool;
+    // Clear legacy decoders when switching to pool mode
+    if (pool) {
+        decoders_.clear();
+    }
+}
+
+void TimelineEvaluator::release_all_leases() {
+    active_leases_.clear();
+    prev_active_path_.clear();
+}
+
 IVideoDecoder* TimelineEvaluator::get_decoder_for(const std::string& path) {
     if (path.empty()) return nullptr;
+
+    // Pool mode: acquire from decoder pool
+    if (decoder_pool_) {
+        auto it = active_leases_.find(path);
+        if (it != active_leases_.end() && it->second) {
+            return it->second.decoder();
+        }
+
+        // Acquire from pool (High priority for active playback)
+        DecoderLease lease = decoder_pool_->acquire(path, DecoderPriority::High);
+        if (!lease) return nullptr;
+        IVideoDecoder* dec = lease.decoder();
+        active_leases_[path] = std::move(lease);
+        return dec;
+    }
+
+    // Legacy mode: unbounded decoder map
     auto it = decoders_.find(path);
     if (it != decoders_.end()) return it->second.get();
     auto dec = create_video_decoder(engine_);
@@ -89,6 +124,26 @@ int TimelineEvaluator::render_frame(GopostFrame** output) {
     gopost_video_frame_clear(out_frame);
 
     std::vector<std::pair<int32_t, const Clip*>> active = model_->active_clips_at_position();
+
+    // Collect paths needed for this frame, release leases no longer needed
+    if (decoder_pool_) {
+        std::unordered_map<std::string, bool> needed_paths;
+        for (const auto& p : active) {
+            if (p.second->source_type == ClipSourceType::Video ||
+                p.second->source_type == ClipSourceType::Image) {
+                needed_paths[p.second->source_path] = true;
+            }
+        }
+        // Release leases for paths no longer active
+        for (auto it = active_leases_.begin(); it != active_leases_.end(); ) {
+            if (needed_paths.find(it->first) == needed_paths.end()) {
+                it = active_leases_.erase(it);
+            } else {
+                ++it;
+            }
+        }
+    }
+
     for (const auto& p : active) {
         const Clip* clip = p.second;
         GopostFrame* layer_frame = get_clip_frame_at(clip, pos, frame_index);

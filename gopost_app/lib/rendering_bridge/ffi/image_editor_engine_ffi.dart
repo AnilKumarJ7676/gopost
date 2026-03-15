@@ -505,10 +505,11 @@ class GopostImageEditorEngineFfi implements ImageEditorEngine {
     try {
       _globalExportProgress = onProgress;
       final pathPtr = outputPath.toNativeUtf8();
+      const int kExceptionalReturn = -1;
       final progressCb = Pointer.fromFunction<
-          Int32 Function(Float progress, Pointer<Void> userData)>(
+          Int32 Function(Float, Pointer<Void>)>(
         _exportProgressCallback,
-        -1,
+        kExceptionalReturn,
       );
       final err = _bindings!.gopost_export_to_file(
           canvasPtr, configPtr, pathPtr, progressCb.cast<Void>(), nullptr);

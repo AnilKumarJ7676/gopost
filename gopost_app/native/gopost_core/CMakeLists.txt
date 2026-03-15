@@ -69,6 +69,10 @@ if(OpenSSL_FOUND)
     target_link_libraries(gopost_core PRIVATE OpenSSL::Crypto)
 endif()
 
+if(WIN32)
+    target_link_libraries(gopost_core PRIVATE bcrypt)
+endif()
+
 if(GOPOST_HAS_WEBP)
     target_compile_definitions(gopost_core PRIVATE GOPOST_HAS_WEBP)
     target_include_directories(gopost_core PRIVATE ${WEBP_INCLUDE_DIR})

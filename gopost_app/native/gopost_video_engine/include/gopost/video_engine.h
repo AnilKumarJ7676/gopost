@@ -502,6 +502,70 @@ GopostError gopost_timeline_switch_multicam_angle(
 GopostError gopost_timeline_flatten_multicam(
     GopostTimeline* timeline, int32_t clip_id);
 
+/* =========================================================================
+   Phase 7: Extended Clip Engine — multi-clip, collision, sync-lock
+   ========================================================================= */
+
+/** Move multiple clips simultaneously. */
+GopostError gopost_timeline_move_multiple_clips(
+    GopostTimeline* timeline,
+    const int32_t* clip_ids, int32_t count,
+    double delta_time, int32_t delta_track);
+
+/** Swap two clips on the timeline. */
+GopostError gopost_timeline_swap_clips(
+    GopostTimeline* timeline,
+    int32_t clip_id_a, int32_t clip_id_b);
+
+/** Split all tracks at the given time. Returns count of new clips created. */
+GopostError gopost_timeline_split_all_tracks(
+    GopostTimeline* timeline,
+    double split_time_seconds,
+    int32_t* out_new_clip_count);
+
+/** Lift delete: remove clips in range without closing gap. */
+GopostError gopost_timeline_lift_delete(
+    GopostTimeline* timeline,
+    int32_t track_index,
+    double range_start_seconds,
+    double range_end_seconds);
+
+/** Collision detection: check if a region on a track overlaps existing clips.
+ *  out_result: 0 = CLEAR, 1 = OVERLAP, 2 = ADJACENT. */
+GopostError gopost_timeline_check_overlap(
+    GopostTimeline* timeline,
+    int32_t track_index,
+    double in_time, double out_time,
+    int32_t exclude_clip_id,
+    int32_t* out_result);
+
+/** Get IDs of clips overlapping a region on a track. */
+GopostError gopost_timeline_get_overlapping_clips(
+    GopostTimeline* timeline,
+    int32_t track_index,
+    double in_time, double out_time,
+    int32_t* out_clip_ids, int32_t max_ids,
+    int32_t* out_count);
+
+/** Set sync-lock on a track. When enabled, moving clips on one track
+ *  ripples all sync-locked tracks. */
+GopostError gopost_timeline_set_track_sync_lock(
+    GopostTimeline* timeline,
+    int32_t track_index,
+    int32_t locked);
+
+/** Set track height (persisted per project). */
+GopostError gopost_timeline_set_track_height(
+    GopostTimeline* timeline,
+    int32_t track_index,
+    float height_px);
+
+/** Get track height. */
+GopostError gopost_timeline_get_track_height(
+    const GopostTimeline* timeline,
+    int32_t track_index,
+    float* out_height_px);
+
 #ifdef __cplusplus
 }
 #endif

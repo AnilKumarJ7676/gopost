@@ -2,10 +2,14 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:gopost_app/video_editor/domain/models/editor_layout_state.dart';
+import 'package:gopost_app/video_editor/presentation/providers/editor_layout_notifier.dart';
 import 'package:gopost_app/video_editor/presentation/providers/project_list_notifier.dart';
 import 'package:gopost_app/video_editor/presentation/providers/timeline_notifier.dart';
 import 'package:gopost_app/video_editor/presentation/screens/export_screen.dart';
+import 'package:gopost_app/video_editor/presentation/widgets/dock_system.dart';
 import 'package:gopost_app/video_editor/presentation/widgets/editor_sidebar.dart';
+import 'package:gopost_app/video_editor/presentation/widgets/resizable_split.dart';
 import 'package:gopost_app/video_editor/presentation/widgets/save_as_video_template_dialog.dart';
 import 'package:gopost_app/video_editor/presentation/widgets/timeline_panel.dart';
 import 'package:gopost_app/video_editor/presentation/widgets/video_preview_panel.dart';
@@ -75,6 +79,9 @@ class _VideoEditorScreenState extends ConsumerState<VideoEditorScreen> {
   late final FocusNode _focusNode;
   final TextEditingController _projectNameCtrl = TextEditingController(text: 'Untitled project');
 
+  // Floating panels
+  final List<FloatingPanelState> _floatingPanels = [];
+
   @override
   void initState() {
     super.initState();
@@ -104,8 +111,6 @@ class _VideoEditorScreenState extends ConsumerState<VideoEditorScreen> {
     super.dispose();
   }
 
-  /// Unified keyboard handler — single source of truth for all editor shortcuts.
-  /// Covers playback, JKL shuttle, navigation, editing, zoom, and in/out points.
   KeyEventResult _handleKeyEvent(FocusNode node, KeyEvent event) {
     if (event is! KeyDownEvent && event is! KeyRepeatEvent) {
       return KeyEventResult.ignored;
@@ -117,135 +122,35 @@ class _VideoEditorScreenState extends ConsumerState<VideoEditorScreen> {
     final isShift = HardwareKeyboard.instance.isShiftPressed;
     final isAlt = HardwareKeyboard.instance.isAltPressed;
 
-    // -- Undo / Redo --
-    if (isCmd && isShift && key == LogicalKeyboardKey.keyZ) {
-      notifier.redo();
-      return KeyEventResult.handled;
-    }
-    if (isCmd && key == LogicalKeyboardKey.keyZ) {
-      notifier.undo();
-      return KeyEventResult.handled;
-    }
-
-    // -- Save --
-    if (isCmd && key == LogicalKeyboardKey.keyS) {
-      _saveProject(ref.read(timelineNotifierProvider));
-      return KeyEventResult.handled;
-    }
-
-    // -- Playback --
-    if (key == LogicalKeyboardKey.space) {
-      notifier.togglePlayback();
-      return KeyEventResult.handled;
-    }
-
-    // -- JKL Shuttle Transport --
-    if (key == LogicalKeyboardKey.keyJ) {
-      notifier.shuttleReverse();
-      return KeyEventResult.handled;
-    }
-    if (key == LogicalKeyboardKey.keyK) {
-      notifier.shuttleStop();
-      return KeyEventResult.handled;
-    }
-    if (key == LogicalKeyboardKey.keyL) {
-      notifier.shuttleForward();
-      return KeyEventResult.handled;
-    }
-
-    // -- Frame stepping --
-    if (key == LogicalKeyboardKey.arrowLeft) {
-      if (isShift) {
-        notifier.stepBackwardN(10);
-      } else {
-        notifier.stepBackward();
-      }
-      return KeyEventResult.handled;
-    }
-    if (key == LogicalKeyboardKey.arrowRight) {
-      if (isShift) {
-        notifier.stepForwardN(10);
-      } else {
-        notifier.stepForward();
-      }
-      return KeyEventResult.handled;
-    }
-
-    // -- Jump to start / end --
-    if (key == LogicalKeyboardKey.home) {
-      notifier.jumpToStart();
-      return KeyEventResult.handled;
-    }
-    if (key == LogicalKeyboardKey.end) {
-      notifier.jumpToEnd();
-      return KeyEventResult.handled;
-    }
-
-    // -- In / Out points --
-    if (key == LogicalKeyboardKey.keyI && !isCmd) {
-      notifier.setInPoint();
-      return KeyEventResult.handled;
-    }
-    if (key == LogicalKeyboardKey.keyO && !isCmd) {
-      notifier.setOutPoint();
-      return KeyEventResult.handled;
-    }
-    if (isAlt && key == LogicalKeyboardKey.keyX) {
-      notifier.clearInOutPoints();
-      return KeyEventResult.handled;
-    }
-
-    // -- Clip navigation by snap points (Up/Down arrow) --
-    if (key == LogicalKeyboardKey.arrowUp) {
-      notifier.jumpToPreviousSnapPoint();
-      return KeyEventResult.handled;
-    }
-    if (key == LogicalKeyboardKey.arrowDown) {
-      notifier.jumpToNextSnapPoint();
-      return KeyEventResult.handled;
-    }
-
-    // -- Delete / Backspace --
+    if (isCmd && isShift && key == LogicalKeyboardKey.keyZ) { notifier.redo(); return KeyEventResult.handled; }
+    if (isCmd && key == LogicalKeyboardKey.keyZ) { notifier.undo(); return KeyEventResult.handled; }
+    if (isCmd && key == LogicalKeyboardKey.keyS) { _saveProject(ref.read(timelineNotifierProvider)); return KeyEventResult.handled; }
+    if (key == LogicalKeyboardKey.space) { notifier.togglePlayback(); return KeyEventResult.handled; }
+    if (key == LogicalKeyboardKey.keyJ) { notifier.shuttleReverse(); return KeyEventResult.handled; }
+    if (key == LogicalKeyboardKey.keyK) { notifier.shuttleStop(); return KeyEventResult.handled; }
+    if (key == LogicalKeyboardKey.keyL) { notifier.shuttleForward(); return KeyEventResult.handled; }
+    if (key == LogicalKeyboardKey.arrowLeft) { isShift ? notifier.stepBackwardN(10) : notifier.stepBackward(); return KeyEventResult.handled; }
+    if (key == LogicalKeyboardKey.arrowRight) { isShift ? notifier.stepForwardN(10) : notifier.stepForward(); return KeyEventResult.handled; }
+    if (key == LogicalKeyboardKey.home) { notifier.jumpToStart(); return KeyEventResult.handled; }
+    if (key == LogicalKeyboardKey.end) { notifier.jumpToEnd(); return KeyEventResult.handled; }
+    if (key == LogicalKeyboardKey.keyI && !isCmd) { notifier.setInPoint(); return KeyEventResult.handled; }
+    if (key == LogicalKeyboardKey.keyO && !isCmd) { notifier.setOutPoint(); return KeyEventResult.handled; }
+    if (isAlt && key == LogicalKeyboardKey.keyX) { notifier.clearInOutPoints(); return KeyEventResult.handled; }
+    if (key == LogicalKeyboardKey.arrowUp) { notifier.jumpToPreviousSnapPoint(); return KeyEventResult.handled; }
+    if (key == LogicalKeyboardKey.arrowDown) { notifier.jumpToNextSnapPoint(); return KeyEventResult.handled; }
     if (key == LogicalKeyboardKey.delete || key == LogicalKeyboardKey.backspace) {
       final selected = ref.read(timelineNotifierProvider).selectedClipId;
-      if (selected != null) {
-        notifier.removeClip(selected);
-        return KeyEventResult.handled;
-      }
+      if (selected != null) { notifier.removeClip(selected); return KeyEventResult.handled; }
     }
-
-    // -- Markers --
-    if (key == LogicalKeyboardKey.keyM && !isCmd) {
-      notifier.addMarker();
-      return KeyEventResult.handled;
-    }
-    if (key == LogicalKeyboardKey.bracketLeft) {
-      notifier.navigateToPreviousMarker();
-      return KeyEventResult.handled;
-    }
-    if (key == LogicalKeyboardKey.bracketRight) {
-      notifier.navigateToNextMarker();
-      return KeyEventResult.handled;
-    }
-
-    // -- Duplicate clip --
+    if (key == LogicalKeyboardKey.keyM && !isCmd) { notifier.addMarker(); return KeyEventResult.handled; }
+    if (key == LogicalKeyboardKey.bracketLeft) { notifier.navigateToPreviousMarker(); return KeyEventResult.handled; }
+    if (key == LogicalKeyboardKey.bracketRight) { notifier.navigateToNextMarker(); return KeyEventResult.handled; }
     if (isCmd && key == LogicalKeyboardKey.keyD) {
       final selected = ref.read(timelineNotifierProvider).selectedClipId;
-      if (selected != null) {
-        notifier.duplicateClip(selected);
-        return KeyEventResult.handled;
-      }
+      if (selected != null) { notifier.duplicateClip(selected); return KeyEventResult.handled; }
     }
-
-    // -- Zoom (Cmd/Ctrl + / -) --
-    if (isCmd && (key == LogicalKeyboardKey.equal || key == LogicalKeyboardKey.numpadAdd)) {
-      notifier.zoomIn();
-      return KeyEventResult.handled;
-    }
-    if (isCmd && (key == LogicalKeyboardKey.minus || key == LogicalKeyboardKey.numpadSubtract)) {
-      notifier.zoomOut();
-      return KeyEventResult.handled;
-    }
+    if (isCmd && (key == LogicalKeyboardKey.equal || key == LogicalKeyboardKey.numpadAdd)) { notifier.zoomIn(); return KeyEventResult.handled; }
+    if (isCmd && (key == LogicalKeyboardKey.minus || key == LogicalKeyboardKey.numpadSubtract)) { notifier.zoomOut(); return KeyEventResult.handled; }
 
     return KeyEventResult.ignored;
   }
@@ -290,26 +195,38 @@ class _VideoEditorScreenState extends ConsumerState<VideoEditorScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final layout = ref.watch(editorLayoutProvider);
+    final layoutNotifier = ref.read(editorLayoutProvider.notifier);
+
     return Theme(
       data: _editorDarkTheme,
       child: Focus(
         focusNode: _focusNode,
         onKeyEvent: _handleKeyEvent,
         child: Scaffold(
-          body: Column(
+          body: Stack(
             children: [
-              _buildTopBar(),
-              const Expanded(
-                flex: 5,
-                child: Row(
-                  children: [
-                    RepaintBoundary(child: EditorIconRail()),
-                    RepaintBoundary(child: EditorPanelArea()),
-                    Expanded(child: RepaintBoundary(child: VideoPreviewPanel())),
-                  ],
+              // Main editor layout
+              _buildMainLayout(layout, layoutNotifier),
+              // Floating panels overlay
+              for (int i = 0; i < _floatingPanels.length; i++)
+                FloatingPanel(
+                  key: ValueKey('float_${_floatingPanels[i].id}'),
+                  panelState: _floatingPanels[i],
+                  title: _floatingPanels[i].title,
+                  onStateChanged: (newState) {
+                    setState(() => _floatingPanels[i] = newState);
+                  },
+                  onClose: () {
+                    setState(() => _floatingPanels.removeAt(i));
+                  },
+                  onRedock: () {
+                    setState(() => _floatingPanels.removeAt(i));
+                  },
+                  child: const Center(
+                    child: Text('Panel content', style: TextStyle(color: Color(0xFF6B6B88))),
+                  ),
                 ),
-              ),
-              const Expanded(flex: 4, child: RepaintBoundary(child: TimelinePanel())),
             ],
           ),
         ),
@@ -317,7 +234,85 @@ class _VideoEditorScreenState extends ConsumerState<VideoEditorScreen> {
     );
   }
 
-  Widget _buildTopBar() {
+  Widget _buildMainLayout(EditorLayoutState layout, EditorLayoutNotifier layoutNotifier) {
+    // If a panel is maximized, show only that panel
+    if (layout.maximizedPanelId != null) {
+      return Column(
+        children: [
+          _buildTopBar(layout, layoutNotifier),
+          Expanded(
+            child: GestureDetector(
+              onDoubleTap: () => layoutNotifier.clearMaximize(),
+              child: _resolveMaximizedPanel(layout.maximizedPanelId!),
+            ),
+          ),
+        ],
+      );
+    }
+
+    return Column(
+      children: [
+        _buildTopBar(layout, layoutNotifier),
+        Expanded(
+          child: HorizontalSplit(
+            fraction: layout.upperFraction,
+            minTopFraction: kMinUpperFraction,
+            maxTopFraction: kMaxUpperFraction,
+            onFractionChanged: (f) => layoutNotifier.setUpperFraction(f),
+            onDoubleTap: () => layoutNotifier.resetHorizontalSplitter(),
+            // Upper area: icon rail + sidebar + preview
+            top: Row(
+              children: [
+                const RepaintBoundary(child: EditorIconRail()),
+                RepaintBoundary(
+                  child: _buildSidebarWithSplitter(layout, layoutNotifier),
+                ),
+                const Expanded(child: RepaintBoundary(child: VideoPreviewPanel())),
+              ],
+            ),
+            // Lower area: timeline
+            bottom: const RepaintBoundary(child: TimelinePanel()),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildSidebarWithSplitter(EditorLayoutState layout, EditorLayoutNotifier layoutNotifier) {
+    final sidebarWidth = layout.sidebarWidth;
+
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        if (sidebarWidth >= 1)
+          SizedBox(
+            width: sidebarWidth.clamp(0.0, kMaxSidebarWidth),
+            child: const EditorPanelArea(),
+          ),
+        _SidebarSplitter(
+          onDrag: (dx) {
+            var newWidth = sidebarWidth + dx;
+            if (newWidth < kSidebarCollapseThreshold) newWidth = 0;
+            layoutNotifier.setSidebarWidth(
+              newWidth.clamp(0, kMaxSidebarWidth),
+            );
+          },
+          onDoubleTap: () => layoutNotifier.resetVerticalSplitter(),
+        ),
+      ],
+    );
+  }
+
+  Widget _resolveMaximizedPanel(String panelId) {
+    return switch (panelId) {
+      'preview' => const VideoPreviewPanel(),
+      'timeline' => const TimelinePanel(),
+      'sidebar' => const EditorPanelArea(),
+      _ => const VideoPreviewPanel(),
+    };
+  }
+
+  Widget _buildTopBar(EditorLayoutState layout, EditorLayoutNotifier layoutNotifier) {
     final state = ref.watch(timelineNotifierProvider);
     final notifier = ref.read(timelineNotifierProvider.notifier);
 
@@ -336,11 +331,7 @@ class _VideoEditorScreenState extends ConsumerState<VideoEditorScreen> {
             onPressed: () => context.pop(),
             tooltip: 'Back',
           ),
-          Container(
-            width: 1, height: 26,
-            margin: const EdgeInsets.symmetric(horizontal: 8),
-            color: const Color(0xFF252540),
-          ),
+          Container(width: 1, height: 26, margin: const EdgeInsets.symmetric(horizontal: 8), color: const Color(0xFF252540)),
           const Icon(Icons.play_circle_filled_rounded, size: 24, color: Color(0xFF6C63FF)),
           const SizedBox(width: 10),
           SizedBox(
@@ -354,6 +345,13 @@ class _VideoEditorScreenState extends ConsumerState<VideoEditorScreen> {
                 contentPadding: EdgeInsets.symmetric(vertical: 4),
               ),
             ),
+          ),
+          const SizedBox(width: 16),
+          // Layout preset selector
+          LayoutPresetSelector(
+            activePreset: layout.activePreset,
+            onPresetSelected: (preset) => layoutNotifier.applyPreset(preset),
+            onSaveCustom: () => layoutNotifier.saveCurrentAsPreset('custom'),
           ),
           const Spacer(),
           if (state.isReady) ...[
@@ -373,14 +371,8 @@ class _VideoEditorScreenState extends ConsumerState<VideoEditorScreen> {
                   ),
                 ),
               ),
-            _topBarButton(
-              icon: Icons.undo_rounded, tooltip: 'Undo (Ctrl+Z)',
-              onPressed: state.canUndo ? notifier.undo : null,
-            ),
-            _topBarButton(
-              icon: Icons.redo_rounded, tooltip: 'Redo (Ctrl+Shift+Z)',
-              onPressed: state.canRedo ? notifier.redo : null,
-            ),
+            _topBarButton(icon: Icons.undo_rounded, tooltip: 'Undo (Ctrl+Z)', onPressed: state.canUndo ? notifier.undo : null),
+            _topBarButton(icon: Icons.redo_rounded, tooltip: 'Redo (Ctrl+Shift+Z)', onPressed: state.canRedo ? notifier.redo : null),
             Container(width: 1, height: 26, margin: const EdgeInsets.symmetric(horizontal: 8), color: const Color(0xFF252540)),
             PopupMenuButton<String>(
               icon: const Icon(Icons.more_horiz_rounded, size: 24, color: Color(0xFF8888A0)),
@@ -424,6 +416,51 @@ class _VideoEditorScreenState extends ConsumerState<VideoEditorScreen> {
       tooltip: tooltip,
       padding: const EdgeInsets.all(8),
       constraints: const BoxConstraints(minWidth: 38, minHeight: 38),
+    );
+  }
+}
+
+class _SidebarSplitter extends StatefulWidget {
+  final ValueChanged<double> onDrag;
+  final VoidCallback? onDoubleTap;
+
+  const _SidebarSplitter({required this.onDrag, this.onDoubleTap});
+
+  @override
+  State<_SidebarSplitter> createState() => _SidebarSplitterState();
+}
+
+class _SidebarSplitterState extends State<_SidebarSplitter> {
+  bool _hovering = false;
+  bool _dragging = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final isActive = _hovering || _dragging;
+    return GestureDetector(
+      onHorizontalDragStart: (_) => setState(() => _dragging = true),
+      onHorizontalDragUpdate: (d) => widget.onDrag(d.delta.dx),
+      onHorizontalDragEnd: (_) => setState(() => _dragging = false),
+      onDoubleTap: widget.onDoubleTap,
+      child: MouseRegion(
+        cursor: SystemMouseCursors.resizeColumn,
+        onEnter: (_) => setState(() => _hovering = true),
+        onExit: (_) => setState(() => _hovering = false),
+        child: Container(
+          width: 6,
+          color: isActive ? const Color(0xFF6C63FF) : const Color(0xFF252540),
+          child: Center(
+            child: Container(
+              width: 2,
+              height: 40,
+              decoration: BoxDecoration(
+                color: isActive ? Colors.white.withValues(alpha: 0.6) : const Color(0xFF404060),
+                borderRadius: BorderRadius.circular(1),
+              ),
+            ),
+          ),
+        ),
+      ),
     );
   }
 }

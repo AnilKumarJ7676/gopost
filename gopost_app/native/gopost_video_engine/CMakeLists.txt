@@ -1,3 +1,5 @@
+option(GOPOST_USE_HW_DECODER "Enable GPU-accelerated video decoding via FFmpeg hw_device_ctx" OFF)
+
 set(VIDEO_ENGINE_SOURCES
     src/video/timeline_model.cpp
     src/video/frame_cache.cpp
@@ -9,6 +11,10 @@ set(VIDEO_ENGINE_SOURCES
     src/video/transition_renderer.cpp
     src/video/keyframe_evaluator.cpp
     src/video/video_exporter.cpp
+    src/video/decoder_pool.cpp
+    src/video/thumbnail_generator.cpp
+    src/video/decoder_pool_api.cpp
+    src/texture/texture_bridge_cpu.cpp
 )
 
 if(APPLE)
@@ -24,6 +30,12 @@ elseif(GOPOST_HAS_FFMPEG)
         src/video/audio_decoder_ffmpeg.cpp
         src/video/media_probe_ffmpeg.cpp
     )
+    # GPU-accelerated decoder (optional, requires FFmpeg hw accel support)
+    if(GOPOST_USE_HW_DECODER)
+        list(APPEND VIDEO_ENGINE_SOURCES
+            src/video/hw_video_decoder.cpp
+        )
+    endif()
 else()
     list(APPEND VIDEO_ENGINE_SOURCES
         src/video/video_decoder_stub.cpp
@@ -40,6 +52,7 @@ target_include_directories(gopost_video_engine PUBLIC
 target_include_directories(gopost_video_engine PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/src
     ${CMAKE_CURRENT_SOURCE_DIR}/src/video
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/texture
 )
 
 target_link_libraries(gopost_video_engine PUBLIC gopost_core)
@@ -51,6 +64,37 @@ if(GOPOST_HAS_FFMPEG)
         target_link_directories(gopost_video_engine PRIVATE ${FFMPEG_LIBRARY_DIRS})
     endif()
     target_link_libraries(gopost_video_engine PRIVATE ${FFMPEG_LIBRARIES})
+
+    # GPU-accelerated decoder: platform-specific hw accel libraries
+    if(GOPOST_USE_HW_DECODER)
+        target_compile_definitions(gopost_video_engine PRIVATE GOPOST_USE_HW_DECODER)
+
+        if(WIN32)
+            # D3D11VA: Direct3D 11 Video Acceleration
+            target_link_libraries(gopost_video_engine PRIVATE d3d11 dxgi)
+        endif()
+
+        if(APPLE)
+            # VideoToolbox (hw decode is handled via AVFoundation on Apple,
+            # but FFmpeg can also use VT as an hw accel backend)
+            find_library(VIDEOTOOLBOX_FW VideoToolbox)
+            if(VIDEOTOOLBOX_FW)
+                target_link_libraries(gopost_video_engine PRIVATE ${VIDEOTOOLBOX_FW})
+            endif()
+        endif()
+
+        if(UNIX AND NOT APPLE AND NOT ANDROID)
+            # VAAPI / VDPAU on Linux
+            find_package(PkgConfig QUIET)
+            if(PkgConfig_FOUND)
+                pkg_check_modules(VAAPI QUIET libva libva-drm)
+                if(VAAPI_FOUND)
+                    target_link_libraries(gopost_video_engine PRIVATE ${VAAPI_LIBRARIES})
+                    target_include_directories(gopost_video_engine PRIVATE ${VAAPI_INCLUDE_DIRS})
+                endif()
+            endif()
+        endif()
+    endif()
 endif()
 
 # Force-load entire static archive so FFI entry points (called only from Dart) are exported

@@ -19,7 +19,9 @@ class TimeRuler extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final totalWidth = (duration > 0 ? duration : 10) * pixelsPerSecond;
-    final width = totalWidth.clamp(viewportWidth, 50000.0);
+    // Cap at 100,000px — Flutter can handle this, and it ensures even
+    // very long timelines (hours) with moderate zoom are renderable.
+    final width = totalWidth.clamp(viewportWidth, 100000.0);
     final interval = _bestInterval(pixelsPerSecond);
 
     return Container(
@@ -41,11 +43,15 @@ class TimeRuler extends StatelessWidget {
   }
 
   static double _bestInterval(double pxPerSec) {
-    const intervals = [0.1, 0.25, 0.5, 1.0, 2.0, 5.0, 10.0, 15.0, 30.0, 60.0];
+    // Extended intervals to support timelines from seconds to hours.
+    const intervals = [
+      0.1, 0.25, 0.5, 1.0, 2.0, 5.0, 10.0, 15.0, 30.0,
+      60.0, 120.0, 300.0, 600.0, 900.0, 1800.0, 3600.0,
+    ];
     for (final i in intervals) {
       if (i * pxPerSec >= 60) return i;
     }
-    return 60;
+    return 3600;
   }
 }
 
@@ -147,8 +153,13 @@ class _RulerPainter extends CustomPainter {
       final frac = ((s - sec) * 10).floor();
       return frac > 0 ? '$sec.${frac}s' : '${sec}s';
     }
-    final m = (s / 60).floor();
-    final sec = (s % 60).floor();
+    final totalSec = s.floor();
+    final h = totalSec ~/ 3600;
+    final m = (totalSec % 3600) ~/ 60;
+    final sec = totalSec % 60;
+    if (h > 0) {
+      return '$h:${m.toString().padLeft(2, '0')}:${sec.toString().padLeft(2, '0')}';
+    }
     return '$m:${sec.toString().padLeft(2, '0')}';
   }
 

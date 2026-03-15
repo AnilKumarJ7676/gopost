@@ -31,7 +31,17 @@ class FfmpegCliRunner implements FfmpegRunner {
         _parseProgress(data);
       });
 
-      final exitCode = await process.exitCode;
+      // Proxy generation for long videos can take many minutes.
+      // Use a generous timeout (6 hours) so encoding completes fully.
+      // The moov atom is only written on successful completion, so
+      // killing ffmpeg early produces corrupt MP4 files.
+      final exitCode = await process.exitCode.timeout(
+        const Duration(hours: 6),
+        onTimeout: () {
+          process.kill();
+          return -1;
+        },
+      );
       _activeProcess = null;
 
       final output = stderrBuf.toString() + stdoutBuf.toString();

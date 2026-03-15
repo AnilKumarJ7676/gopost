@@ -176,4 +176,13 @@ class KeyframeAudioDelegate {
       return null;
     }
   }
+
+  /// Fast, non-blocking probe for instant import. Returns within ~100ms.
+  Future<MediaInfo?> probeMediaFast(String filePath) async {
+    try {
+      return await _ops.engine.probeMediaFast(filePath);
+    } catch (_) {
+      return null;
+    }
+  }
 }

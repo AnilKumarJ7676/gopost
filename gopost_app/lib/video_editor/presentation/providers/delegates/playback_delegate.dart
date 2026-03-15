@@ -338,14 +338,37 @@ class PlaybackDelegate {
   // Zoom / scroll
   // -------------------------------------------------------------------------
 
+  /// Minimum pixels-per-second. Low enough to fit very long timelines
+  /// (e.g. 24 hours at 0.01 px/sec = 864 px — fits any duration).
+  static const double kMinZoom = 0.01;
+  static const double kMaxZoom = 400.0;
+
   void setZoom(double pixelsPerSecond) {
     _ops.currentState = _ops.currentState.copyWith(
-      pixelsPerSecond: pixelsPerSecond.clamp(20.0, 400.0),
+      pixelsPerSecond: pixelsPerSecond.clamp(kMinZoom, kMaxZoom),
     );
   }
 
   void zoomIn() => setZoom(_ops.currentState.pixelsPerSecond * 1.25);
   void zoomOut() => setZoom(_ops.currentState.pixelsPerSecond / 1.25);
+
+  /// Zoom so that the entire timeline fits within [viewportWidth] pixels,
+  /// with a small margin so clips don't touch the edges.
+  void zoomToFit(double viewportWidth) {
+    final duration = _ops.currentState.duration;
+    if (duration <= 0 || viewportWidth <= 0) return;
+    // Leave 20px margin on each side (minimal to maximize clip visibility)
+    final usable = viewportWidth - 40;
+    if (usable <= 0) return;
+    final idealPps = usable / duration;
+    // Apply zoom without clamping to kMinZoom/kMaxZoom — autofit should
+    // always succeed regardless of timeline length.
+    final clampedPps = idealPps.clamp(kMinZoom, kMaxZoom);
+    _ops.currentState = _ops.currentState.copyWith(
+      pixelsPerSecond: clampedPps,
+      scrollOffset: 0,
+    );
+  }
 
   void setScrollOffset(double offset) {
     _ops.currentState = _ops.currentState.copyWith(scrollOffset: offset);
@@ -380,7 +403,13 @@ class PlaybackDelegate {
     }
 
     final state = _ops.currentState;
-    if (state.playback.isPlaying && state.playback.activeVideoPath != null) return;
+    // Skip engine rendering whenever a media_kit player is handling
+    // the video clip.  The preview panel's media_kit player displays
+    // the decoded frame for both playing AND paused states (it seeks
+    // to the correct position on pause).  The stub engine cannot
+    // decode real frames anyway, so rendering here would just produce
+    // a dark placeholder that overwrites the actual video texture.
+    if (state.playback.activeVideoPath != null) return;
 
     final project = state.project;
     if (project == null) return;
@@ -389,6 +418,11 @@ class PlaybackDelegate {
     _renderRequested = false;
 
     try {
+      // Ensure the engine position matches the UI playhead before rendering.
+      // selectClip and other state changes may update positionSeconds without
+      // calling engine.seek, so we always sync here to prevent stale frames.
+      await _ops.engine.seek(project.timelineId, state.playback.positionSeconds);
+
       final frame = await _ops.engine.renderFrame(project.timelineId);
       if (frame == null || !_ops.isMounted) return;
       if (frame.width <= 0 || frame.height <= 0) return;
@@ -441,12 +475,21 @@ class PlaybackDelegate {
     final dur = _ops.currentState.duration;
 
     if (dur > 0 && pos >= dur) {
-      pos = 0;
+      // Clamp to the end — keep showing the last frame instead of jumping to 0.
+      // Update position in state BEFORE pause so updateActiveVideo can find
+      // the correct clip and the preview stays visible.
+      pos = dur - 0.001; // Slightly before end so clip lookup succeeds
+      _ops.currentState = _ops.currentState.copyWith(
+        playback: _ops.currentState.playback.copyWith(positionSeconds: pos),
+      );
       pause();
       return;
     }
     if (pos < 0) {
       pos = 0;
+      _ops.currentState = _ops.currentState.copyWith(
+        playback: _ops.currentState.playback.copyWith(positionSeconds: pos),
+      );
       pause();
       return;
     }

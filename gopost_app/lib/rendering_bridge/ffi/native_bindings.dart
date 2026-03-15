@@ -706,6 +706,416 @@ class NativeBindings {
       int Function(int)>(
     'gopost_export_cancel',
   );
+
+  // --- Phase 2: NLE Edit Operations ---
+
+  late final gopost_timeline_insert_edit = _lib.lookupFunction<
+      Int32 Function(Pointer<Void>, Int32, Double, Pointer<NativeGopostClipDescriptor>, Pointer<Int32>),
+      int Function(Pointer<Void>, int, double, Pointer<NativeGopostClipDescriptor>, Pointer<Int32>)>(
+    'gopost_timeline_insert_edit',
+  );
+
+  late final gopost_timeline_overwrite_edit = _lib.lookupFunction<
+      Int32 Function(Pointer<Void>, Int32, Double, Pointer<NativeGopostClipDescriptor>, Pointer<Int32>),
+      int Function(Pointer<Void>, int, double, Pointer<NativeGopostClipDescriptor>, Pointer<Int32>)>(
+    'gopost_timeline_overwrite_edit',
+  );
+
+  late final gopost_timeline_roll_edit = _lib.lookupFunction<
+      Int32 Function(Pointer<Void>, Int32, Double),
+      int Function(Pointer<Void>, int, double)>(
+    'gopost_timeline_roll_edit',
+  );
+
+  late final gopost_timeline_slip_edit = _lib.lookupFunction<
+      Int32 Function(Pointer<Void>, Int32, Double),
+      int Function(Pointer<Void>, int, double)>(
+    'gopost_timeline_slip_edit',
+  );
+
+  late final gopost_timeline_slide_edit = _lib.lookupFunction<
+      Int32 Function(Pointer<Void>, Int32, Double),
+      int Function(Pointer<Void>, int, double)>(
+    'gopost_timeline_slide_edit',
+  );
+
+  late final gopost_timeline_rate_stretch = _lib.lookupFunction<
+      Int32 Function(Pointer<Void>, Int32, Double),
+      int Function(Pointer<Void>, int, double)>(
+    'gopost_timeline_rate_stretch',
+  );
+
+  late final gopost_timeline_duplicate_clip = _lib.lookupFunction<
+      Int32 Function(Pointer<Void>, Int32, Pointer<Int32>),
+      int Function(Pointer<Void>, int, Pointer<Int32>)>(
+    'gopost_timeline_duplicate_clip',
+  );
+
+  late final gopost_timeline_get_snap_points = _lib.lookupFunction<
+      Int32 Function(Pointer<Void>, Double, Double, Pointer<Double>, Int32, Pointer<Int32>),
+      int Function(Pointer<Void>, double, double, Pointer<Double>, int, Pointer<Int32>)>(
+    'gopost_timeline_get_snap_points',
+  );
+
+  late final gopost_timeline_reorder_tracks = _lib.lookupFunction<
+      Int32 Function(Pointer<Void>, Pointer<Int32>, Int32),
+      int Function(Pointer<Void>, Pointer<Int32>, int)>(
+    'gopost_timeline_reorder_tracks',
+  );
+
+  // --- Phase 3: Effect DAG & Registry ---
+
+  late final gopost_timeline_add_clip_effect = _lib.lookupFunction<
+      Int32 Function(Pointer<Void>, Int32, Pointer<Utf8>, Pointer<Int32>),
+      int Function(Pointer<Void>, int, Pointer<Utf8>, Pointer<Int32>)>(
+    'gopost_timeline_add_clip_effect',
+  );
+
+  late final gopost_timeline_remove_clip_effect = _lib.lookupFunction<
+      Int32 Function(Pointer<Void>, Int32, Int32),
+      int Function(Pointer<Void>, int, int)>(
+    'gopost_timeline_remove_clip_effect',
+  );
+
+  late final gopost_timeline_set_clip_effect_param = _lib.lookupFunction<
+      Int32 Function(Pointer<Void>, Int32, Int32, Pointer<Utf8>, Float),
+      int Function(Pointer<Void>, int, int, Pointer<Utf8>, double)>(
+    'gopost_timeline_set_clip_effect_param',
+  );
+
+  late final gopost_timeline_set_clip_effect_enabled = _lib.lookupFunction<
+      Int32 Function(Pointer<Void>, Int32, Int32, Int32),
+      int Function(Pointer<Void>, int, int, int)>(
+    'gopost_timeline_set_clip_effect_enabled',
+  );
+
+  late final gopost_timeline_set_clip_effect_mix = _lib.lookupFunction<
+      Int32 Function(Pointer<Void>, Int32, Int32, Float),
+      int Function(Pointer<Void>, int, int, double)>(
+    'gopost_timeline_set_clip_effect_mix',
+  );
+
+  // --- Phase 4: Masking & Tracking ---
+
+  late final gopost_timeline_add_clip_mask = _lib.lookupFunction<
+      Int32 Function(Pointer<Void>, Int32, Pointer<NativeGopostMaskDesc>, Pointer<NativeGopostMaskPoint>, Pointer<Int32>),
+      int Function(Pointer<Void>, int, Pointer<NativeGopostMaskDesc>, Pointer<NativeGopostMaskPoint>, Pointer<Int32>)>(
+    'gopost_timeline_add_clip_mask',
+  );
+
+  late final gopost_timeline_update_clip_mask = _lib.lookupFunction<
+      Int32 Function(Pointer<Void>, Int32, Int32, Pointer<NativeGopostMaskDesc>, Pointer<NativeGopostMaskPoint>),
+      int Function(Pointer<Void>, int, int, Pointer<NativeGopostMaskDesc>, Pointer<NativeGopostMaskPoint>)>(
+    'gopost_timeline_update_clip_mask',
+  );
+
+  late final gopost_timeline_remove_clip_mask = _lib.lookupFunction<
+      Int32 Function(Pointer<Void>, Int32, Int32),
+      int Function(Pointer<Void>, int, int)>(
+    'gopost_timeline_remove_clip_mask',
+  );
+
+  late final gopost_timeline_start_tracking = _lib.lookupFunction<
+      Int32 Function(Pointer<Void>, Int32, Float, Float, Double, Pointer<Int32>),
+      int Function(Pointer<Void>, int, double, double, double, Pointer<Int32>)>(
+    'gopost_timeline_start_tracking',
+  );
+
+  late final gopost_timeline_stabilize_clip = _lib.lookupFunction<
+      Int32 Function(Pointer<Void>, Int32, Int32, Float, Int32),
+      int Function(Pointer<Void>, int, int, double, int)>(
+    'gopost_timeline_stabilize_clip',
+  );
+
+  // --- Phase 5: Text, Shapes, Audio Effects ---
+
+  late final gopost_timeline_set_clip_text = _lib.lookupFunction<
+      Int32 Function(Pointer<Void>, Int32, Pointer<NativeGopostTextLayerDesc>),
+      int Function(Pointer<Void>, int, Pointer<NativeGopostTextLayerDesc>)>(
+    'gopost_timeline_set_clip_text',
+  );
+
+  late final gopost_timeline_add_clip_shape = _lib.lookupFunction<
+      Int32 Function(Pointer<Void>, Int32, Pointer<NativeGopostShapeDesc>, Pointer<Int32>),
+      int Function(Pointer<Void>, int, Pointer<NativeGopostShapeDesc>, Pointer<Int32>)>(
+    'gopost_timeline_add_clip_shape',
+  );
+
+  late final gopost_timeline_update_clip_shape = _lib.lookupFunction<
+      Int32 Function(Pointer<Void>, Int32, Int32, Pointer<NativeGopostShapeDesc>),
+      int Function(Pointer<Void>, int, int, Pointer<NativeGopostShapeDesc>)>(
+    'gopost_timeline_update_clip_shape',
+  );
+
+  late final gopost_timeline_remove_clip_shape = _lib.lookupFunction<
+      Int32 Function(Pointer<Void>, Int32, Int32),
+      int Function(Pointer<Void>, int, int)>(
+    'gopost_timeline_remove_clip_shape',
+  );
+
+  late final gopost_timeline_add_audio_effect = _lib.lookupFunction<
+      Int32 Function(Pointer<Void>, Int32, Pointer<Utf8>, Pointer<Int32>),
+      int Function(Pointer<Void>, int, Pointer<Utf8>, Pointer<Int32>)>(
+    'gopost_timeline_add_audio_effect',
+  );
+
+  late final gopost_timeline_set_audio_effect_param = _lib.lookupFunction<
+      Int32 Function(Pointer<Void>, Int32, Int32, Pointer<Utf8>, Float),
+      int Function(Pointer<Void>, int, int, Pointer<Utf8>, double)>(
+    'gopost_timeline_set_audio_effect_param',
+  );
+
+  late final gopost_timeline_remove_audio_effect = _lib.lookupFunction<
+      Int32 Function(Pointer<Void>, Int32, Int32),
+      int Function(Pointer<Void>, int, int)>(
+    'gopost_timeline_remove_audio_effect',
+  );
+
+  // --- Phase 6: AI, Proxy, Multi-Cam ---
+
+  late final gopost_timeline_start_ai_segmentation = _lib.lookupFunction<
+      Int32 Function(Pointer<Void>, Int32, Int32, Float, Int32, Pointer<Int32>),
+      int Function(Pointer<Void>, int, int, double, int, Pointer<Int32>)>(
+    'gopost_timeline_start_ai_segmentation',
+  );
+
+  late final gopost_ai_segmentation_get_progress = _lib.lookupFunction<
+      Double Function(Int32),
+      double Function(int)>(
+    'gopost_ai_segmentation_get_progress',
+  );
+
+  late final gopost_ai_segmentation_cancel = _lib.lookupFunction<
+      Int32 Function(Int32),
+      int Function(int)>(
+    'gopost_ai_segmentation_cancel',
+  );
+
+  late final gopost_timeline_enable_proxy_mode = _lib.lookupFunction<
+      Int32 Function(Pointer<Void>, Int32, Int32, Int32),
+      int Function(Pointer<Void>, int, int, int)>(
+    'gopost_timeline_enable_proxy_mode',
+  );
+
+  late final gopost_timeline_disable_proxy_mode = _lib.lookupFunction<
+      Int32 Function(Pointer<Void>),
+      int Function(Pointer<Void>)>(
+    'gopost_timeline_disable_proxy_mode',
+  );
+
+  late final gopost_timeline_is_proxy_active = _lib.lookupFunction<
+      Int32 Function(Pointer<Void>, Pointer<Int32>),
+      int Function(Pointer<Void>, Pointer<Int32>)>(
+    'gopost_timeline_is_proxy_active',
+  );
+
+  late final gopost_timeline_create_multicam_clip = _lib.lookupFunction<
+      Int32 Function(Pointer<Void>, Int32, Pointer<Utf8>, Pointer<NativeGopostCameraAngle>, Int32, Double, Pointer<Int32>),
+      int Function(Pointer<Void>, int, Pointer<Utf8>, Pointer<NativeGopostCameraAngle>, int, double, Pointer<Int32>)>(
+    'gopost_timeline_create_multicam_clip',
+  );
+
+  late final gopost_timeline_switch_multicam_angle = _lib.lookupFunction<
+      Int32 Function(Pointer<Void>, Int32, Int32, Double),
+      int Function(Pointer<Void>, int, int, double)>(
+    'gopost_timeline_switch_multicam_angle',
+  );
+
+  late final gopost_timeline_flatten_multicam = _lib.lookupFunction<
+      Int32 Function(Pointer<Void>, Int32),
+      int Function(Pointer<Void>, int)>(
+    'gopost_timeline_flatten_multicam',
+  );
+
+  // --- Phase 7: Extended Clip Engine ---
+
+  late final gopost_timeline_move_multiple_clips = _lib.lookupFunction<
+      Int32 Function(Pointer<Void>, Pointer<Int32>, Int32, Double, Int32),
+      int Function(Pointer<Void>, Pointer<Int32>, int, double, int)>(
+    'gopost_timeline_move_multiple_clips',
+  );
+
+  late final gopost_timeline_swap_clips = _lib.lookupFunction<
+      Int32 Function(Pointer<Void>, Int32, Int32),
+      int Function(Pointer<Void>, int, int)>(
+    'gopost_timeline_swap_clips',
+  );
+
+  late final gopost_timeline_split_all_tracks = _lib.lookupFunction<
+      Int32 Function(Pointer<Void>, Double, Pointer<Int32>),
+      int Function(Pointer<Void>, double, Pointer<Int32>)>(
+    'gopost_timeline_split_all_tracks',
+  );
+
+  late final gopost_timeline_lift_delete = _lib.lookupFunction<
+      Int32 Function(Pointer<Void>, Int32, Double, Double),
+      int Function(Pointer<Void>, int, double, double)>(
+    'gopost_timeline_lift_delete',
+  );
+
+  late final gopost_timeline_check_overlap = _lib.lookupFunction<
+      Int32 Function(Pointer<Void>, Int32, Double, Double, Int32, Pointer<Int32>),
+      int Function(Pointer<Void>, int, double, double, int, Pointer<Int32>)>(
+    'gopost_timeline_check_overlap',
+  );
+
+  late final gopost_timeline_get_overlapping_clips = _lib.lookupFunction<
+      Int32 Function(Pointer<Void>, Int32, Double, Double, Pointer<Int32>, Int32, Pointer<Int32>),
+      int Function(Pointer<Void>, int, double, double, Pointer<Int32>, int, Pointer<Int32>)>(
+    'gopost_timeline_get_overlapping_clips',
+  );
+
+  late final gopost_timeline_set_track_sync_lock = _lib.lookupFunction<
+      Int32 Function(Pointer<Void>, Int32, Int32),
+      int Function(Pointer<Void>, int, int)>(
+    'gopost_timeline_set_track_sync_lock',
+  );
+
+  late final gopost_timeline_set_track_height = _lib.lookupFunction<
+      Int32 Function(Pointer<Void>, Int32, Float),
+      int Function(Pointer<Void>, int, double)>(
+    'gopost_timeline_set_track_height',
+  );
+
+  late final gopost_timeline_get_track_height = _lib.lookupFunction<
+      Int32 Function(Pointer<Void>, Int32, Pointer<Float>),
+      int Function(Pointer<Void>, int, Pointer<Float>)>(
+    'gopost_timeline_get_track_height',
+  );
+
+  // =========================================================================
+  // Decoder Pool & Thumbnail Generator
+  // =========================================================================
+
+  late final gopost_decoder_pool_create = _lib.lookupFunction<
+      Int32 Function(Pointer<Void>, Int32, Pointer<Pointer<Void>>),
+      int Function(Pointer<Void>, int, Pointer<Pointer<Void>>)>(
+    'gopost_decoder_pool_create',
+  );
+
+  late final gopost_decoder_pool_destroy = _lib.lookupFunction<
+      Void Function(Pointer<Void>),
+      void Function(Pointer<Void>)>(
+    'gopost_decoder_pool_destroy',
+  );
+
+  late final gopost_decoder_pool_set_max = _lib.lookupFunction<
+      Int32 Function(Pointer<Void>, Int32),
+      int Function(Pointer<Void>, int)>(
+    'gopost_decoder_pool_set_max',
+  );
+
+  late final gopost_decoder_pool_active_count = _lib.lookupFunction<
+      Int32 Function(Pointer<Void>, Pointer<Int32>),
+      int Function(Pointer<Void>, Pointer<Int32>)>(
+    'gopost_decoder_pool_active_count',
+  );
+
+  late final gopost_decoder_pool_flush_idle = _lib.lookupFunction<
+      Int32 Function(Pointer<Void>),
+      int Function(Pointer<Void>)>(
+    'gopost_decoder_pool_flush_idle',
+  );
+
+  late final gopost_thumbnail_generator_create = _lib.lookupFunction<
+      Int32 Function(Pointer<Void>, Pointer<Void>, Pointer<Pointer<Void>>),
+      int Function(Pointer<Void>, Pointer<Void>, Pointer<Pointer<Void>>)>(
+    'gopost_thumbnail_generator_create',
+  );
+
+  late final gopost_thumbnail_generator_destroy = _lib.lookupFunction<
+      Void Function(Pointer<Void>),
+      void Function(Pointer<Void>)>(
+    'gopost_thumbnail_generator_destroy',
+  );
+
+  late final gopost_thumbnail_submit = _lib.lookupFunction<
+      Int32 Function(Pointer<Void>, Pointer<NativeGopostThumbnailRequest>),
+      int Function(Pointer<Void>, Pointer<NativeGopostThumbnailRequest>)>(
+    'gopost_thumbnail_submit',
+  );
+
+  late final gopost_thumbnail_cancel = _lib.lookupFunction<
+      Int32 Function(Pointer<Void>, Int32),
+      int Function(Pointer<Void>, int)>(
+    'gopost_thumbnail_cancel',
+  );
+
+  late final gopost_thumbnail_cancel_all = _lib.lookupFunction<
+      Int32 Function(Pointer<Void>),
+      int Function(Pointer<Void>)>(
+    'gopost_thumbnail_cancel_all',
+  );
+
+  late final gopost_thumbnail_job_status = _lib.lookupFunction<
+      Int32 Function(Pointer<Void>, Int32),
+      int Function(Pointer<Void>, int)>(
+    'gopost_thumbnail_job_status',
+  );
+
+  late final gopost_thumbnail_result_count = _lib.lookupFunction<
+      Int32 Function(Pointer<Void>, Int32),
+      int Function(Pointer<Void>, int)>(
+    'gopost_thumbnail_result_count',
+  );
+
+  late final gopost_thumbnail_get_result = _lib.lookupFunction<
+      Int32 Function(Pointer<Void>, Int32, Int32,
+                     Pointer<NativeGopostThumbnailResult>),
+      int Function(Pointer<Void>, int, int,
+                   Pointer<NativeGopostThumbnailResult>)>(
+    'gopost_thumbnail_get_result',
+  );
+
+  late final gopost_thumbnail_queue_size = _lib.lookupFunction<
+      Int32 Function(Pointer<Void>),
+      int Function(Pointer<Void>)>(
+    'gopost_thumbnail_queue_size',
+  );
+
+  // =========================================================================
+  // Texture Bridge & Hardware Decoder
+  // =========================================================================
+
+  late final gopost_query_hw_decoder = _lib.lookupFunction<
+      Int32 Function(Pointer<NativeGopostHwDecoderInfo>),
+      int Function(Pointer<NativeGopostHwDecoderInfo>)>(
+    'gopost_query_hw_decoder',
+  );
+
+  late final gopost_texture_bridge_create = _lib.lookupFunction<
+      Int32 Function(Pointer<Void>, Int32, Int32,
+                     Pointer<Pointer<Void>>, Pointer<Int64>),
+      int Function(Pointer<Void>, int, int,
+                   Pointer<Pointer<Void>>, Pointer<Int64>)>(
+    'gopost_texture_bridge_create',
+  );
+
+  late final gopost_texture_bridge_update_frame = _lib.lookupFunction<
+      Int32 Function(Pointer<Void>, Pointer<NativeGopostFrame>),
+      int Function(Pointer<Void>, Pointer<NativeGopostFrame>)>(
+    'gopost_texture_bridge_update_frame',
+  );
+
+  late final gopost_texture_bridge_resize = _lib.lookupFunction<
+      Int32 Function(Pointer<Void>, Int32, Int32),
+      int Function(Pointer<Void>, int, int)>(
+    'gopost_texture_bridge_resize',
+  );
+
+  late final gopost_texture_bridge_destroy = _lib.lookupFunction<
+      Void Function(Pointer<Void>),
+      void Function(Pointer<Void>)>(
+    'gopost_texture_bridge_destroy',
+  );
+
+  late final gopost_texture_bridge_get_pixels = _lib.lookupFunction<
+      Int32 Function(Pointer<Void>, Pointer<Pointer<Uint8>>,
+                     Pointer<Int32>, Pointer<Int32>, Pointer<Int64>),
+      int Function(Pointer<Void>, Pointer<Pointer<Uint8>>,
+                   Pointer<Int32>, Pointer<Int32>, Pointer<Int64>)>(
+    'gopost_texture_bridge_get_pixels',
+  );
 }
 
 /// Mirrors GopostEngineConfig from engine.h.
@@ -1031,3 +1441,157 @@ final class NativeGopostClipDescriptor extends Struct {
   @Uint32()
   external int effectHash;
 }
+
+/// Mirrors GopostMaskDesc from video_engine.h.
+final class NativeGopostMaskDesc extends Struct {
+  @Int32()
+  external int type;
+  @Float()
+  external double feather;
+  @Float()
+  external double opacity;
+  @Int32()
+  external int inverted;
+  @Float()
+  external double expansion;
+  @Int32()
+  external int pointCount;
+}
+
+/// Mirrors GopostMaskPoint from video_engine.h.
+final class NativeGopostMaskPoint extends Struct {
+  @Float()
+  external double x;
+  @Float()
+  external double y;
+  @Float()
+  external double handleInX;
+  @Float()
+  external double handleInY;
+  @Float()
+  external double handleOutX;
+  @Float()
+  external double handleOutY;
+}
+
+/// Mirrors GopostTextLayerDesc from video_engine.h.
+final class NativeGopostTextLayerDesc extends Struct {
+  @Array(512)
+  external Array<Int8> text;
+  @Array(128)
+  external Array<Int8> fontFamily;
+  @Array(64)
+  external Array<Int8> fontStyle;
+  @Float()
+  external double fontSize;
+  @Uint32()
+  external int fillColor;
+  @Int32()
+  external int fillEnabled;
+  @Uint32()
+  external int strokeColor;
+  @Float()
+  external double strokeWidth;
+  @Int32()
+  external int strokeEnabled;
+  @Int32()
+  external int alignment;
+  @Float()
+  external double tracking;
+  @Float()
+  external double leading;
+  @Float()
+  external double positionX;
+  @Float()
+  external double positionY;
+  @Float()
+  external double rotation;
+  @Float()
+  external double scaleX;
+  @Float()
+  external double scaleY;
+}
+
+/// Mirrors GopostShapeDesc from video_engine.h.
+final class NativeGopostShapeDesc extends Struct {
+  @Int32()
+  external int type;
+  @Float()
+  external double x;
+  @Float()
+  external double y;
+  @Float()
+  external double width;
+  @Float()
+  external double height;
+  @Float()
+  external double rotation;
+  @Uint32()
+  external int fillColor;
+  @Int32()
+  external int fillEnabled;
+  @Uint32()
+  external int strokeColor;
+  @Float()
+  external double strokeWidth;
+  @Int32()
+  external int strokeEnabled;
+  @Float()
+  external double cornerRadius;
+  @Int32()
+  external int sides;
+  @Float()
+  external double innerRadius;
+}
+
+/// Mirrors GopostCameraAngle from video_engine.h.
+final class NativeGopostCameraAngle extends Struct {
+  @Array(128)
+  external Array<Int8> name;
+  @Array(1024)
+  external Array<Int8> sourcePath;
+  @Double()
+  external double syncOffset;
+}
+
+/// Mirrors GopostHwDecoderInfo from texture_bridge.h.
+final class NativeGopostHwDecoderInfo extends Struct {
+  @Int32()
+  external int available;
+  @Array(128)
+  external Array<Uint8> deviceName;
+  @Int32()
+  external int maxWidth;
+  @Int32()
+  external int maxHeight;
+}
+
+/// Mirrors GopostThumbnailRequest from decoder_pool_api.h.
+final class NativeGopostThumbnailRequest extends Struct {
+  @Array(1024)
+  external Array<Int8> sourcePath;
+  @Double()
+  external double sourceDuration;
+  @Int32()
+  external int count;
+  @Int32()
+  external int thumbWidth;
+  @Int32()
+  external int thumbHeight;
+  @Int32()
+  external int priority;
+}
+
+/// Mirrors GopostThumbnailResult from decoder_pool_api.h.
+final class NativeGopostThumbnailResult extends Struct {
+  external Pointer<Uint8> jpegData;
+  @Int32()
+  external int jpegSize;
+  @Int32()
+  external int width;
+  @Int32()
+  external int height;
+  @Double()
+  external double timestamp;
+}
+

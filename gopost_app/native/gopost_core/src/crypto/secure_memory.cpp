@@ -28,6 +28,8 @@ void secure_zero(void* ptr, size_t len) {
 bool lock_memory(void* ptr, size_t len) {
 #if defined(__APPLE__) || defined(__linux__) || defined(__ANDROID__)
     return mlock(ptr, len) == 0;
+#elif defined(_WIN32)
+    return VirtualLock(ptr, len) != 0;
 #else
     (void)ptr;
     (void)len;
@@ -38,6 +40,8 @@ bool lock_memory(void* ptr, size_t len) {
 bool unlock_memory(void* ptr, size_t len) {
 #if defined(__APPLE__) || defined(__linux__) || defined(__ANDROID__)
     return munlock(ptr, len) == 0;
+#elif defined(_WIN32)
+    return VirtualUnlock(ptr, len) != 0;
 #else
     (void)ptr;
     (void)len;

@@ -8,8 +8,10 @@
 #include <string>
 #include <vector>
 
-#ifdef __unix__
+#if defined(__unix__)
 #include <sys/mman.h>
+#elif defined(_WIN32) && !defined(GOPOST_HAS_SHA256)
+#include <windows.h>
 #endif
 
 #if defined(__APPLE__)
@@ -17,6 +19,10 @@
 #define GOPOST_HAS_SHA256 1
 #elif defined(GOPOST_USE_OPENSSL)
 #include <openssl/sha.h>
+#define GOPOST_HAS_SHA256 1
+#elif defined(_WIN32)
+#include <windows.h>
+#include <bcrypt.h>
 #define GOPOST_HAS_SHA256 1
 #endif
 
@@ -71,16 +77,27 @@ static void sha256_hash(const uint8_t* data, size_t len, uint8_t out[32]) {
     CC_SHA256(data, static_cast<CC_LONG>(len), out);
 #elif defined(GOPOST_USE_OPENSSL)
     SHA256(data, len, out);
+#elif defined(_WIN32)
+    BCRYPT_ALG_HANDLE hAlg = nullptr;
+    BCRYPT_HASH_HANDLE hHash = nullptr;
+    BCryptOpenAlgorithmProvider(&hAlg, BCRYPT_SHA256_ALGORITHM, nullptr, 0);
+    BCryptCreateHash(hAlg, &hHash, nullptr, 0, nullptr, 0, 0);
+    BCryptHashData(hHash, const_cast<PUCHAR>(data), static_cast<ULONG>(len), 0);
+    BCryptFinishHash(hHash, out, 32, 0);
+    BCryptDestroyHash(hHash);
+    BCryptCloseAlgorithmProvider(hAlg, 0);
 #else
-    #error "No SHA-256 backend available. Define GOPOST_USE_OPENSSL or build on Apple."
+    #error "No SHA-256 backend available. Define GOPOST_USE_OPENSSL or build on Apple/Windows."
 #endif
 }
 
 static void* secure_alloc(size_t size) {
     void* ptr = malloc(size);
     if (!ptr) return nullptr;
-#ifdef __unix__
+#if defined(__unix__)
     mlock(ptr, size);
+#elif defined(_WIN32)
+    VirtualLock(ptr, size);
 #endif
     return ptr;
 }
@@ -88,8 +105,10 @@ static void* secure_alloc(size_t size) {
 static void secure_free(void* ptr, size_t size) {
     if (!ptr) return;
     memset(ptr, 0, size);
-#ifdef __unix__
+#if defined(__unix__)
     munlock(ptr, size);
+#elif defined(_WIN32)
+    VirtualUnlock(ptr, size);
 #endif
     free(ptr);
 }

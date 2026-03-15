@@ -93,6 +93,37 @@ class GopostEngineFfi implements GopostEngine {
   }
 
   @override
+  Future<HwDecoderInfo> queryHwDecoder() async {
+    _ensureInitialized();
+    final infoPtr = calloc<NativeGopostHwDecoderInfo>();
+    try {
+      final err = _bindings!.gopost_query_hw_decoder(infoPtr);
+      if (err != 0) {
+        return const HwDecoderInfo(available: false);
+      }
+      final available = infoPtr.ref.available != 0;
+      String deviceName = '';
+      if (available) {
+        final nameBytes = <int>[];
+        for (int i = 0; i < 128; i++) {
+          final byte = infoPtr.ref.deviceName[i];
+          if (byte == 0) break;
+          nameBytes.add(byte);
+        }
+        deviceName = String.fromCharCodes(nameBytes);
+      }
+      return HwDecoderInfo(
+        available: available,
+        deviceName: deviceName,
+        maxWidth: infoPtr.ref.maxWidth,
+        maxHeight: infoPtr.ref.maxHeight,
+      );
+    } finally {
+      calloc.free(infoPtr);
+    }
+  }
+
+  @override
   Future<TemplateMetadata> loadTemplate(
       Uint8List encryptedBlob, Uint8List sessionKey) async {
     _ensureInitialized();

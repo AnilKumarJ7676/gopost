@@ -270,9 +270,9 @@ class _VideoToolbarState extends ConsumerState<VideoToolbar> {
 
     final displayName = path.split(RegExp(r'[/\\]')).last;
 
-    // Probe the file for real duration and metadata.
-    final info = await notifier.probeMedia(path);
-    final duration = info?.durationSeconds ?? (isVideo ? 10.0 : 5.0);
+    // Fast probe (< 100ms) so the clip appears on the timeline instantly.
+    final fastInfo = await notifier.probeMediaFast(path);
+    final duration = fastInfo?.durationSeconds ?? (isVideo ? 10.0 : 5.0);
 
     final clipId = await notifier.addClip(
       trackIndex: videoTrack.index,
@@ -282,15 +282,25 @@ class _VideoToolbarState extends ConsumerState<VideoToolbar> {
       duration: duration,
     );
 
-    if (clipId != null && mounted) {
-      final durationStr = '${duration.toStringAsFixed(1)}s';
-      final sizeStr = info != null ? ' (${info.width}×${info.height})' : '';
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Added ${isVideo ? "video" : "photo"}: $displayName — $durationStr$sizeStr'),
-          duration: const Duration(seconds: 2),
-        ),
-      );
+    if (clipId != null) {
+      // Refine duration in background without blocking the UI.
+      notifier.probeMedia(path).then((info) {
+        if (info != null && info.durationSeconds > 0.1) {
+          notifier.updateClipDuration(clipId, info.durationSeconds);
+        }
+      }).catchError((_) {});
+
+      if (isVideo) notifier.generateProxyForClip(clipId);
+
+      if (mounted) {
+        final durationStr = '${duration.toStringAsFixed(1)}s';
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Added ${isVideo ? "video" : "photo"}: $displayName — $durationStr'),
+            duration: const Duration(seconds: 2),
+          ),
+        );
+      }
     }
   }
 }
