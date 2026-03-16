@@ -17,6 +17,7 @@ const QList<Router::RouteInfo>& Router::routes() {
         {QStringLiteral("/auth/login"), false},
         {QStringLiteral("/auth/register"), false},
         {QStringLiteral("/editor/video"), true},
+        {QStringLiteral("/editor/video2"), true},
         {QStringLiteral("/editor/image"), true},
         {QStringLiteral("/editor/customize/:id"), true},
         {QStringLiteral("/editor/video/customize/:id"), true},

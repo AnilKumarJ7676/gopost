@@ -1,6 +1,12 @@
 #include "rendering_bridge/stub_video_timeline_engine.h"
 
+#include <QDebug>
 #include <QFileInfo>
+#include <QPainter>
+#include <QImage>
+#include <QColor>
+#include <QFont>
+#include <QRect>
 
 #include <algorithm>
 #include <cmath>
@@ -55,6 +61,17 @@ int StubVideoTimelineEngine::createTimeline(const TimelineConfig& config) {
 }
 
 void StubVideoTimelineEngine::destroyTimeline(int timelineId) {
+    // Clean up decode threads for all clips in this timeline
+    auto trackIt = tracks_.find(timelineId);
+    if (trackIt != tracks_.end()) {
+        for (const auto& track : trackIt->second) {
+            for (const auto& clip : track.clips) {
+                decoders_.erase(clip.id);
+                cachedFrames_.erase(clip.id);
+                lastSeekTime_.erase(clip.id);
+            }
+        }
+    }
     configs_.erase(timelineId);
     tracks_.erase(timelineId);
     positions_.erase(timelineId);
@@ -154,6 +171,27 @@ int StubVideoTimelineEngine::addClip(int timelineId,
     clip.blendMode = descriptor.blendMode;
     clip.effectHash = descriptor.effectHash;
     tracks[descriptor.trackIndex].clips.push_back(std::move(clip));
+
+    // Start a background decode thread for video clips (only when decode is enabled)
+    if (decodeEnabled_ &&
+        descriptor.sourceType == VideoClipSourceType::Video &&
+        !descriptor.sourcePath.isEmpty()) {
+        qDebug() << "[StubEngine] addClip: starting decode thread for clip" << clipId
+                 << "path:" << descriptor.sourcePath;
+        auto dt = std::make_unique<RenderDecodeThread>(8);
+        if (dt->open(descriptor.sourcePath)) {
+            qDebug() << "[StubEngine] decode thread opened:" << dt->width() << "x" << dt->height()
+                     << "fps:" << dt->frameRate() << "duration:" << dt->duration();
+            // Seek to source-in so we start decoding from the clip's start
+            if (descriptor.sourceRange.sourceIn > 0.01) {
+                dt->seekTo(descriptor.sourceRange.sourceIn);
+            }
+            decoders_[clipId] = std::move(dt);
+        } else {
+            qWarning() << "[StubEngine] FAILED to open decode thread for:" << descriptor.sourcePath;
+        }
+    }
+
     return clipId;
 }
 
@@ -167,6 +205,9 @@ void StubVideoTimelineEngine::removeClip(int timelineId, int clipId) {
                            }),
             track.clips.end());
     }
+    decoders_.erase(clipId);
+    cachedFrames_.erase(clipId);
+    lastSeekTime_.erase(clipId);
 }
 
 void StubVideoTimelineEngine::trimClip(int timelineId, int clipId,
@@ -381,14 +422,219 @@ std::vector<int> StubVideoTimelineEngine::getOverlappingClips(
 
 void StubVideoTimelineEngine::seek(int timelineId, double positionSeconds) {
     checkTimeline(timelineId);
+    double prevPos = positions_[timelineId];
     positions_[timelineId] = positionSeconds;
+
+    // Only seek decode threads if the position jumped significantly.
+    // Small sequential advances (< 0.5s) let the decode thread keep
+    // streaming frames sequentially — far cheaper than kill/restart ffmpeg.
+    double jumpThreshold = 0.5;
+    bool isJump = std::abs(positionSeconds - prevPos) > jumpThreshold;
+
+    if (!isJump) return;  // Sequential playback — no need to restart ffmpeg
+
+    auto trackIt = tracks_.find(timelineId);
+    if (trackIt == tracks_.end()) return;
+
+    for (const auto& track : trackIt->second) {
+        for (const auto& clip : track.clips) {
+            auto decIt = decoders_.find(clip.id);
+            if (decIt == decoders_.end()) continue;
+
+            double clipDuration = clip.timelineRange.outTime - clip.timelineRange.inTime;
+            if (clipDuration <= 0) continue;
+
+            if (positionSeconds >= clip.timelineRange.inTime &&
+                positionSeconds < clip.timelineRange.outTime) {
+                double progress = (positionSeconds - clip.timelineRange.inTime) / clipDuration;
+                double sourceDuration = clip.sourceRange.sourceOut - clip.sourceRange.sourceIn;
+                double sourceTime = clip.sourceRange.sourceIn + progress * sourceDuration;
+
+                // Only seek if source time changed significantly from last seek
+                auto lastIt = lastSeekTime_.find(clip.id);
+                if (lastIt == lastSeekTime_.end() || std::abs(sourceTime - lastIt->second) > 0.3) {
+                    decIt->second->seekTo(sourceTime);
+                    lastSeekTime_[clip.id] = sourceTime;
+                }
+            }
+        }
+    }
 }
 
 std::optional<DecodedImage> StubVideoTimelineEngine::renderFrame(
     int timelineId) {
     checkTimeline(timelineId);
-    // Stub: return nullopt so preview relies on external player.
-    return std::nullopt;
+
+    // Get timeline config for dimensions
+    auto cfg = configs_[timelineId];
+    int w = cfg.width  > 0 ? cfg.width  : 1920;
+    int h = cfg.height > 0 ? cfg.height : 1080;
+    double pos = positions_[timelineId];
+
+    // Find clips visible at current position
+    auto trackIt = tracks_.find(timelineId);
+    if (trackIt == tracks_.end() || trackIt->second.empty()) {
+        return std::nullopt;  // no tracks → no frame
+    }
+
+    // Collect visible clips across all tracks
+    struct VisibleClip {
+        const StubClip* clip;
+        int trackIdx;
+    };
+    std::vector<VisibleClip> visible;
+    for (int ti = 0; ti < static_cast<int>(trackIt->second.size()); ++ti) {
+        for (const auto& clip : trackIt->second[ti].clips) {
+            if (pos >= clip.timelineRange.inTime - 0.001 &&
+                pos < clip.timelineRange.outTime + 0.001) {
+                visible.push_back({&clip, ti});
+            }
+        }
+    }
+
+    if (visible.empty()) {
+        // Position is outside all clips — render black frame
+        QImage img(w, h, QImage::Format_RGBA8888);
+        img.fill(QColor(13, 13, 26));  // #0D0D1A
+
+        DecodedImage decoded;
+        decoded.width  = w;
+        decoded.height = h;
+        decoded.pixels = QByteArray(reinterpret_cast<const char*>(img.constBits()),
+                                    img.sizeInBytes());
+        return decoded;
+    }
+
+    // Render a composited preview frame
+    QImage img(w, h, QImage::Format_RGBA8888);
+    img.fill(QColor(13, 13, 26));
+
+    QPainter painter(&img);
+    painter.setRenderHint(QPainter::Antialiasing);
+
+    // Draw from bottom track (highest index) to top track (lowest index)
+    for (auto it = visible.rbegin(); it != visible.rend(); ++it) {
+        const auto* clip = it->clip;
+        double clipProgress = (pos - clip->timelineRange.inTime)
+                            / std::max(0.001, clip->timelineRange.outTime - clip->timelineRange.inTime);
+        clipProgress = std::clamp(clipProgress, 0.0, 1.0);
+
+        // Try to render actual decoded video frame for video clips
+        auto decIt = decoders_.find(clip->id);
+        if (decIt != decoders_.end() && decIt->second->isOpen()) {
+            int buffered = decIt->second->bufferedFrameCount();
+            // Pop available frame from decode buffer
+            auto decodedFrame = decIt->second->popFrame();
+            if (decodedFrame.has_value()) {
+                // Log only the first decoded frame per clip to avoid spam
+                if (cachedFrames_.find(clip->id) == cachedFrames_.end()) {
+                    qDebug() << "[StubEngine] renderFrame: first decoded frame for clip" << clip->id
+                             << "ts:" << decodedFrame->timestamp_seconds
+                             << "size:" << decodedFrame->width << "x" << decodedFrame->height;
+                }
+                cachedFrames_[clip->id] = CachedFrame{std::move(*decodedFrame), pos};
+            }
+
+            // Use cached frame if available
+            auto cacheIt = cachedFrames_.find(clip->id);
+            if (cacheIt != cachedFrames_.end() && !cacheIt->second.frame.pixels.empty()) {
+                const auto& cf = cacheIt->second.frame;
+                QImage frameImg(cf.pixels.data(), cf.width, cf.height,
+                                cf.width * 4, QImage::Format_RGBA8888);
+
+                // Scale decoded frame to output dimensions
+                painter.drawImage(QRect(0, 0, w, h), frameImg);
+
+                // Overlay timecode
+                painter.setPen(QColor(255, 255, 255, 200));
+                QFont tcFont("monospace", 12);
+                painter.setFont(tcFont);
+                int mins = static_cast<int>(pos) / 60;
+                int secs = static_cast<int>(pos) % 60;
+                int frames = static_cast<int>((pos - std::floor(pos)) * 30);
+                QString timecode = QString("%1:%2:%3")
+                    .arg(mins, 2, 10, QChar('0'))
+                    .arg(secs, 2, 10, QChar('0'))
+                    .arg(frames, 2, 10, QChar('0'));
+                painter.drawText(QRect(w - 120, h - 30, 110, 25),
+                                 Qt::AlignRight | Qt::AlignVCenter, timecode);
+
+                break;  // rendered actual frame
+            }
+        }
+
+        // Fallback: colored placeholder for non-video clips or when no frame decoded yet
+        QColor clipColor;
+        switch (clip->sourceType) {
+        case VideoClipSourceType::Video:  clipColor = QColor(38, 198, 218); break; // #26C6DA
+        case VideoClipSourceType::Image:  clipColor = QColor(255, 112, 67); break; // #FF7043
+        case VideoClipSourceType::Title:  clipColor = QColor(171, 71, 188); break; // #AB47BC
+        case VideoClipSourceType::Color:  clipColor = QColor(102, 187, 106); break; // #66BB6A
+        default:                          clipColor = QColor(108, 99, 255);  break; // #6C63FF
+        }
+
+        // Fill background with clip's colour (dimmed)
+        painter.fillRect(0, 0, w, h, QColor(clipColor.red() / 4, clipColor.green() / 4,
+                                             clipColor.blue() / 4));
+
+        // Draw a gradient bar across the frame to show clip progress
+        int barY = h / 2 - 40;
+        int barH = 80;
+        painter.fillRect(0, barY, static_cast<int>(w * clipProgress), barH, clipColor);
+        painter.fillRect(static_cast<int>(w * clipProgress), barY,
+                         w - static_cast<int>(w * clipProgress), barH,
+                         QColor(clipColor.red() / 2, clipColor.green() / 2, clipColor.blue() / 2));
+
+        // Draw clip name and timecode
+        painter.setPen(Qt::white);
+        QFont font("sans-serif", 16);
+        font.setBold(true);
+        painter.setFont(font);
+
+        QString sourceLabel;
+        switch (clip->sourceType) {
+        case VideoClipSourceType::Video:  sourceLabel = "VIDEO"; break;
+        case VideoClipSourceType::Image:  sourceLabel = "IMAGE"; break;
+        case VideoClipSourceType::Title:  sourceLabel = "TITLE"; break;
+        case VideoClipSourceType::Color:  sourceLabel = "COLOR"; break;
+        default:                          sourceLabel = "CLIP";  break;
+        }
+
+        // Source file name
+        QString fileName = clip->sourcePath;
+        if (!fileName.isEmpty()) {
+            int lastSlash = fileName.lastIndexOf('/');
+            if (lastSlash < 0) lastSlash = fileName.lastIndexOf('\\');
+            if (lastSlash >= 0) fileName = fileName.mid(lastSlash + 1);
+        }
+
+        painter.drawText(QRect(0, barY - 60, w, 50), Qt::AlignCenter,
+                         sourceLabel + ": " + fileName);
+
+        // Timecode
+        int mins = static_cast<int>(pos) / 60;
+        int secs = static_cast<int>(pos) % 60;
+        int frames = static_cast<int>((pos - std::floor(pos)) * 30);
+        QString timecode = QString("%1:%2:%3")
+            .arg(mins, 2, 10, QChar('0'))
+            .arg(secs, 2, 10, QChar('0'))
+            .arg(frames, 2, 10, QChar('0'));
+
+        QFont tcFont("monospace", 14);
+        painter.setFont(tcFont);
+        painter.drawText(QRect(0, barY + barH + 10, w, 40), Qt::AlignCenter, timecode);
+
+        break;  // only render topmost visible clip for now
+    }
+
+    painter.end();
+
+    DecodedImage decoded;
+    decoded.width  = w;
+    decoded.height = h;
+    decoded.pixels = QByteArray(reinterpret_cast<const char*>(img.constBits()),
+                                img.sizeInBytes());
+    return decoded;
 }
 
 double StubVideoTimelineEngine::getPosition(int timelineId) {
@@ -573,6 +819,26 @@ std::optional<MediaInfo> StubVideoTimelineEngine::probeMedia(
 
     if (isImage) {
         return MediaInfo{5.0, 1920, 1080, 1.0, 1, false, 0, 0, 0.0};
+    }
+
+    // Try real probe via QProcessVideoDecoder for video files
+    {
+        QProcessVideoDecoder probe;
+        if (probe.open(filePath)) {
+            double dur = probe.duration();
+            double fps = probe.frameRate();
+            int pw = probe.width();
+            int ph = probe.height();
+            probe.close();
+
+            if (dur > 0 && pw > 0 && ph > 0) {
+                return MediaInfo{
+                    dur, pw, ph, fps,
+                    static_cast<int>(dur * fps),
+                    true, 48000, 2, dur
+                };
+            }
+        }
     }
 
     // File-size heuristic fallback

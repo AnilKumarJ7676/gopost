@@ -1,11 +1,14 @@
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
+import QtMultimedia
 
 /**
- * VideoPreviewPanel — video player with engine-rendered frames and full
- * transport controls: play/pause, fast-forward, fast-backward, next/prev
- * snap point, seek slider, and timecode display.
+ * VideoPreviewPanel — real video playback using Qt6 MediaPlayer + VideoOutput.
+ *
+ * Syncs with the timeline: loads the source file of the clip at the current
+ * playhead position, seeks to the correct offset within that file.
+ * Transport controls: play/pause, step, shuttle, jump, seek slider, timecode.
  */
 Item {
     id: root
@@ -26,9 +29,31 @@ Item {
             Layout.fillWidth: true
             Layout.fillHeight: true
 
-            // Engine-rendered frame via QQuickImageProvider
+            // Qt6 MediaPlayer for actual video decoding
+            MediaPlayer {
+                id: mediaPlayer
+                videoOutput: videoOutput
+                audioOutput: AudioOutput { id: audioOut; volume: 1.0 }
+
+                onErrorOccurred: (error, errorString) => {
+                    console.warn("[VideoPlayer] MediaPlayer error:", error, errorString)
+                }
+                onMediaStatusChanged: {
+                    console.log("[VideoPlayer] mediaStatus:", mediaPlayer.mediaStatus,
+                                "duration:", mediaPlayer.duration, "ms")
+                }
+            }
+
+            VideoOutput {
+                id: videoOutput
+                anchors.fill: parent
+                anchors.margins: 2
+                visible: mediaPlayer.hasVideo
+            }
+
+            // Fallback: stub engine frame (when no real video loaded)
             Image {
-                id: previewImage
+                id: fallbackImage
                 anchors.fill: parent
                 anchors.margins: 2
                 fillMode: Image.PreserveAspectFit
@@ -36,14 +61,14 @@ Item {
                 source: timelineNotifier && timelineNotifier.isReady
                         ? ("image://videopreview/" + timelineNotifier.frameVersion)
                         : ""
-                visible: timelineNotifier ? timelineNotifier.isReady : false
+                visible: !mediaPlayer.hasVideo && (timelineNotifier ? timelineNotifier.isReady : false)
             }
 
             // No-clip placeholder
             ColumnLayout {
                 anchors.centerIn: parent
                 spacing: 8
-                visible: timelineNotifier ? !timelineNotifier.isReady : true
+                visible: !mediaPlayer.hasVideo && (timelineNotifier ? !timelineNotifier.isReady : true)
 
                 Label {
                     text: "\u25B6"
@@ -67,9 +92,6 @@ Item {
                         timelineNotifier.togglePlayPause()
                         playIndicatorAnim.restart()
                     }
-                }
-                onDoubleClicked: {
-                    // Future: toggle fullscreen
                 }
             }
 
@@ -127,10 +149,8 @@ Item {
                 onPressedChanged: {
                     if (pressed) {
                         internal.isScrubbing = true
-                        console.log("[VideoPlayer] scrub started at:", value.toFixed(2))
                     } else {
                         if (timelineNotifier) {
-                            console.log("[VideoPlayer] scrub ended at:", value.toFixed(2))
                             timelineNotifier.scrubTo(value)
                         }
                         internal.isScrubbing = false
@@ -212,44 +232,25 @@ Item {
                     spacing: 2
                     Layout.alignment: Qt.AlignHCenter
 
-                    // Jump to start
                     TransportBtn {
                         iconText: "\u23EE"
                         toolTipText: "Jump to Start (Home)"
-                        onClicked: {
-                            console.log("[VideoPlayer] jumpToStart")
-                            if (timelineNotifier) timelineNotifier.jumpToStart()
-                        }
+                        onClicked: { if (timelineNotifier) timelineNotifier.jumpToStart() }
                     }
-
-                    // Previous snap point
                     TransportBtn {
                         iconText: "\u23EA"
                         toolTipText: "Previous (Up)"
-                        onClicked: {
-                            console.log("[VideoPlayer] jumpToPreviousSnapPoint")
-                            if (timelineNotifier) timelineNotifier.jumpToPreviousSnapPoint()
-                        }
+                        onClicked: { if (timelineNotifier) timelineNotifier.jumpToPreviousSnapPoint() }
                     }
-
-                    // Fast backward (shuttle reverse)
                     TransportBtn {
                         iconText: "\u25C0\u25C0"
                         toolTipText: "Fast Backward (J)"
-                        onClicked: {
-                            console.log("[VideoPlayer] shuttleReverse")
-                            if (timelineNotifier) timelineNotifier.shuttleReverse()
-                        }
+                        onClicked: { if (timelineNotifier) timelineNotifier.shuttleReverse() }
                     }
-
-                    // Step backward
                     TransportBtn {
                         iconText: "\u25C0|"
                         toolTipText: "Step Back (Left)"
-                        onClicked: {
-                            console.log("[VideoPlayer] stepBackward")
-                            if (timelineNotifier) timelineNotifier.stepBackward()
-                        }
+                        onClicked: { if (timelineNotifier) timelineNotifier.stepBackward() }
                     }
 
                     // Play / Pause (larger button)
@@ -273,8 +274,6 @@ Item {
                             hoverEnabled: true
                             cursorShape: Qt.PointingHandCursor
                             onClicked: {
-                                console.log("[VideoPlayer] togglePlayPause, isPlaying:",
-                                            timelineNotifier ? timelineNotifier.isPlaying : "n/a")
                                 if (timelineNotifier) {
                                     timelineNotifier.togglePlayPause()
                                     playIndicatorAnim.restart()
@@ -286,44 +285,25 @@ Item {
                         ToolTip.text: (timelineNotifier && timelineNotifier.isPlaying) ? "Pause (Space)" : "Play (Space)"
                     }
 
-                    // Step forward
                     TransportBtn {
                         iconText: "|\u25B6"
                         toolTipText: "Step Forward (Right)"
-                        onClicked: {
-                            console.log("[VideoPlayer] stepForward")
-                            if (timelineNotifier) timelineNotifier.stepForward()
-                        }
+                        onClicked: { if (timelineNotifier) timelineNotifier.stepForward() }
                     }
-
-                    // Fast forward (shuttle forward)
                     TransportBtn {
                         iconText: "\u25B6\u25B6"
                         toolTipText: "Fast Forward (L)"
-                        onClicked: {
-                            console.log("[VideoPlayer] shuttleForward")
-                            if (timelineNotifier) timelineNotifier.shuttleForward()
-                        }
+                        onClicked: { if (timelineNotifier) timelineNotifier.shuttleForward() }
                     }
-
-                    // Next snap point
                     TransportBtn {
                         iconText: "\u23E9"
                         toolTipText: "Next (Down)"
-                        onClicked: {
-                            console.log("[VideoPlayer] jumpToNextSnapPoint")
-                            if (timelineNotifier) timelineNotifier.jumpToNextSnapPoint()
-                        }
+                        onClicked: { if (timelineNotifier) timelineNotifier.jumpToNextSnapPoint() }
                     }
-
-                    // Jump to end
                     TransportBtn {
                         iconText: "\u23ED"
                         toolTipText: "Jump to End (End)"
-                        onClicked: {
-                            console.log("[VideoPlayer] jumpToEnd")
-                            if (timelineNotifier) timelineNotifier.jumpToEnd()
-                        }
+                        onClicked: { if (timelineNotifier) timelineNotifier.jumpToEnd() }
                     }
                 }
 
@@ -339,6 +319,16 @@ Item {
                     horizontalAlignment: Text.AlignRight
                 }
             }
+        }
+    }
+
+    // ================================================================
+    // Sync MediaPlayer with timeline — load source and seek
+    // ================================================================
+    Connections {
+        target: timelineNotifier
+        function onStateChanged() {
+            internal.syncMediaPlayer()
         }
     }
 
@@ -386,16 +376,71 @@ Item {
         id: internal
 
         property bool isScrubbing: false
+        property string currentSource: ""
+        property bool isPlaying: false
 
         function formatTimecode(s) {
             if (s === undefined || s === null || isNaN(s)) return "00:00:00"
             var totalSec = Math.max(0, s)
-            var m = Math.floor(totalSec / 60)
+            var h = Math.floor(totalSec / 3600)
+            var m = Math.floor((totalSec % 3600) / 60)
             var sec = Math.floor(totalSec % 60)
             var frames = Math.floor((totalSec % 1) * 30)
+            if (h > 0) {
+                return String(h) + ":" +
+                       String(m).padStart(2, '0') + ":" +
+                       String(sec).padStart(2, '0') + ":" +
+                       String(frames).padStart(2, '0')
+            }
             return String(m).padStart(2, '0') + ":" +
                    String(sec).padStart(2, '0') + ":" +
                    String(frames).padStart(2, '0')
+        }
+
+        function syncMediaPlayer() {
+            if (!timelineNotifier) return
+
+            var source = timelineNotifier.activeClipSource
+            var offset = timelineNotifier.activeClipOffset
+            var playing = timelineNotifier.isPlaying
+
+            // Load new source if changed
+            if (source && source !== "" && source !== currentSource) {
+                console.log("[VideoPlayer] loading source:", source)
+                currentSource = source
+                mediaPlayer.source = Qt.resolvedUrl("file:///" + source)
+                // Wait for media to load, then seek
+                mediaPlayer.pause()
+            }
+
+            if (!source || source === "") {
+                if (currentSource !== "") {
+                    console.log("[VideoPlayer] no active clip, stopping")
+                    currentSource = ""
+                    mediaPlayer.stop()
+                    mediaPlayer.source = ""
+                }
+                return
+            }
+
+            // Sync playback state
+            if (playing && !isPlaying) {
+                isPlaying = true
+                mediaPlayer.play()
+            } else if (!playing && isPlaying) {
+                isPlaying = false
+                mediaPlayer.pause()
+            }
+
+            // Seek to correct position within source (only when not playing or scrubbing)
+            if (!playing || isScrubbing) {
+                var targetMs = Math.round(offset * 1000)
+                var currentMs = mediaPlayer.position
+                // Only seek if difference is significant (> 100ms)
+                if (Math.abs(targetMs - currentMs) > 100) {
+                    mediaPlayer.setPosition(targetMs)
+                }
+            }
         }
     }
 }

@@ -244,7 +244,7 @@ Item {
                             }
                         }
 
-                        // Drop zone highlight
+                        // Drop zone — accepts media drops directly on this track
                         DropArea {
                             anchors.fill: parent
                             keys: ["application/x-gopost-media"]
@@ -255,6 +255,27 @@ Item {
                                 border.color: parent.containsDrag ? "#6C63FF" : "transparent"
                                 border.width: parent.containsDrag ? 1.5 : 0
                                 radius: 3
+                            }
+
+                            onDropped: drop => {
+                                if (!drop.hasText) return
+                                var data
+                                try { data = JSON.parse(drop.text) } catch (e) { return }
+                                if (data.type !== "media") return
+
+                                var sourceType = 0
+                                if (data.mediaType === "image") sourceType = 1
+
+                                var sourcePath = data.sourcePath || ""
+                                var displayName = data.displayName || "Untitled"
+                                var duration = data.duration || 5.0
+
+                                if (sourcePath === "") return
+
+                                console.log("[Timeline] track-drop: track=", index, "sourceType=", sourceType,
+                                            "name=", displayName, "dur=", duration)
+                                timelineNotifier.addClip(index, sourceType, sourcePath, displayName, duration)
+                                drop.accept()
                             }
                         }
                     }
@@ -273,6 +294,77 @@ Item {
                 }
             }
         }
+    }
+
+    // ================================================================
+    // In/Out point markers — shaded region + markers
+    // ================================================================
+
+    // In point marker
+    Rectangle {
+        id: inPointMarker
+        visible: timelineNotifier ? timelineNotifier.hasInPoint : false
+        anchors.top: rulerRow.top
+        anchors.bottom: scrollBar.top
+        x: headerWidth + (timelineNotifier ? timelineNotifier.inPoint * pps : 0) - trackFlick.contentX
+        width: 2
+        z: 90
+        color: "#66BB6A"
+        opacity: 0.8
+
+        // "I" label at top
+        Rectangle {
+            width: 14; height: 14
+            x: -7; y: 0
+            radius: 2
+            color: "#66BB6A"
+            Label {
+                anchors.centerIn: parent
+                text: "I"
+                font.pixelSize: 9; font.weight: Font.Bold
+                color: "white"
+            }
+        }
+    }
+
+    // Out point marker
+    Rectangle {
+        id: outPointMarker
+        visible: timelineNotifier ? timelineNotifier.hasOutPoint : false
+        anchors.top: rulerRow.top
+        anchors.bottom: scrollBar.top
+        x: headerWidth + (timelineNotifier ? timelineNotifier.outPoint * pps : 0) - trackFlick.contentX
+        width: 2
+        z: 90
+        color: "#EF5350"
+        opacity: 0.8
+
+        // "O" label at top
+        Rectangle {
+            width: 14; height: 14
+            x: -7; y: 0
+            radius: 2
+            color: "#EF5350"
+            Label {
+                anchors.centerIn: parent
+                text: "O"
+                font.pixelSize: 9; font.weight: Font.Bold
+                color: "white"
+            }
+        }
+    }
+
+    // Shaded region between In and Out points
+    Rectangle {
+        visible: timelineNotifier ? (timelineNotifier.hasInPoint && timelineNotifier.hasOutPoint) : false
+        anchors.top: rulerRow.bottom
+        anchors.bottom: scrollBar.top
+        x: headerWidth + (timelineNotifier ? timelineNotifier.inPoint * pps : 0) - trackFlick.contentX
+        width: timelineNotifier ? (timelineNotifier.outPoint - timelineNotifier.inPoint) * pps : 0
+        z: 80
+        color: Qt.rgba(0.424, 0.388, 1.0, 0.06)
+        border.color: Qt.rgba(0.424, 0.388, 1.0, 0.15)
+        border.width: 1
     }
 
     // ================================================================

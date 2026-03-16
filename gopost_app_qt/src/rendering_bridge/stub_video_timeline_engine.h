@@ -1,8 +1,10 @@
 #pragma once
 
 #include "rendering_bridge/engine_api.h"
+#include "rendering_bridge/render_decode_thread.h"
 
 #include <map>
+#include <memory>
 #include <vector>
 
 namespace gopost::rendering {
@@ -13,6 +15,12 @@ class StubVideoTimelineEngine final : public VideoTimelineEngine {
 public:
     StubVideoTimelineEngine() = default;
     ~StubVideoTimelineEngine() override = default;
+
+    /// Enable/disable background FFmpeg decode threads.
+    /// When disabled (default), renderFrame() uses colored placeholders.
+    /// Disable when an external player (e.g. Qt MediaPlayer) handles video display.
+    void setDecodeEnabled(bool enabled) { decodeEnabled_ = enabled; }
+    bool isDecodeEnabled() const { return decodeEnabled_; }
 
     // --- TimelineLifecycle ---
     int createTimeline(const TimelineConfig& config) override;
@@ -182,6 +190,21 @@ private:
     int nextClipId_ = 1;
     int nextExportId_ = 1;
     std::map<int, double> exportProgress_;
+    bool decodeEnabled_ = false;
+
+    // Per-clip video decode threads (clip ID → decode thread)
+    // Only populated for VideoClipSourceType::Video clips
+    std::map<int, std::unique_ptr<RenderDecodeThread>> decoders_;
+
+    // Last decoded frame per clip (cached for repeated renderFrame calls at same position)
+    struct CachedFrame {
+        RenderDecodedFrame frame;
+        double seekedPosition = -1.0;
+    };
+    std::map<int, CachedFrame> cachedFrames_;
+
+    // Last seeked source time per clip — used to avoid redundant seeks
+    std::map<int, double> lastSeekTime_;
 };
 
 } // namespace gopost::rendering

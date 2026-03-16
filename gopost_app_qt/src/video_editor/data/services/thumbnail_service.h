@@ -38,6 +38,9 @@ public:
 
     void clearCache() override;
 
+    /// Remove oldest disk cache files when total exceeds limit.
+    void purgeDiskCache(qint64 maxBytes = 200 * 1024 * 1024);
+
 private:
     static constexpr int kThumbWidth = 120;
     static constexpr int kThumbHeight = 68;
@@ -46,6 +49,7 @@ private:
     static constexpr int kMaxConcurrentGpu = 3;
 
     std::shared_ptr<FfmpegRunner> ffmpeg_;
+    mutable QMutex cacheMutex_;
     QMap<QString, QList<QByteArray>> cache_;
     std::optional<QDir> thumbDir_;
 

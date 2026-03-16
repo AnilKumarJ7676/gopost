@@ -7,6 +7,7 @@ extern "C" {
 #include <libavutil/opt.h>
 }
 
+#include <cmath>
 #include <cstring>
 #include <algorithm>
 
@@ -252,6 +253,40 @@ bool HwVideoDecoder::open(const std::string& path) {
 
     info_.frame_count = (int64_t)(info_.duration_seconds * info_.frame_rate);
 
+    // New metadata fields
+    info_.codec_name = codec->name ? codec->name : "";
+    info_.bitrate    = stream->codecpar->bit_rate > 0
+                         ? stream->codecpar->bit_rate
+                         : fmt_ctx_->bit_rate;
+
+    // Extract rotation from display matrix side data
+    {
+        const uint8_t* matrix_data = nullptr;
+#if LIBAVFORMAT_VERSION_INT >= AV_VERSION_INT(60, 0, 0)
+        const AVPacketSideData* sd = av_packet_side_data_get(
+            stream->codecpar->coded_side_data,
+            stream->codecpar->nb_coded_side_data,
+            AV_PKT_DATA_DISPLAYMATRIX);
+        if (sd) matrix_data = sd->data;
+#else
+        size_t sd_size = 0;
+        matrix_data = av_stream_get_side_data(stream, AV_PKT_DATA_DISPLAYMATRIX,
+                                              reinterpret_cast<int*>(&sd_size));
+#endif
+        if (matrix_data) {
+            double angle = av_display_rotation_get(
+                reinterpret_cast<const int32_t*>(matrix_data));
+            int degrees = -static_cast<int>(std::round(angle));
+            degrees = ((degrees % 360) + 360) % 360;
+            switch (degrees) {
+                case 90:  info_.rotation = Rotation::CW90; break;
+                case 180: info_.rotation = Rotation::CW180; break;
+                case 270: info_.rotation = Rotation::CW270; break;
+                default:  info_.rotation = Rotation::None; break;
+            }
+        }
+    }
+
     // Pre-create swscale context for the expected source format.
     // For hw decode the actual pixel format is determined after the first
     // decode + transfer, so sws_ctx_ will be (re-)created lazily.
@@ -262,6 +297,7 @@ bool HwVideoDecoder::open(const std::string& path) {
             SWS_BILINEAR, nullptr, nullptr, nullptr);
     }
 
+    eof_ = false;
     path_ = path;
     return true;
 }
@@ -280,6 +316,7 @@ void HwVideoDecoder::close() {
 
     video_stream_idx_ = -1;
     using_hw_ = false;
+    eof_ = false;
     hw_pix_fmt_ = AV_PIX_FMT_NONE;
     path_.clear();
     info_ = {};
@@ -385,13 +422,13 @@ GopostFrame* HwVideoDecoder::decode_frame_at(double source_time_seconds) {
     AVStream* stream = fmt_ctx_->streams[video_stream_idx_];
     int64_t target_ts = (int64_t)(clamped / av_q2d(stream->time_base));
 
-    // Seek to nearest keyframe before target
     avcodec_flush_buffers(codec_ctx_);
     if (av_seek_frame(fmt_ctx_, video_stream_idx_, target_ts,
                       AVSEEK_FLAG_BACKWARD) < 0) {
         av_seek_frame(fmt_ctx_, video_stream_idx_, 0, AVSEEK_FLAG_BACKWARD);
     }
     avcodec_flush_buffers(codec_ctx_);
+    eof_ = false;
 
     // Decode forward until we reach the target timestamp
     while (av_read_frame(fmt_ctx_, packet_) >= 0) {
@@ -437,7 +474,136 @@ GopostFrame* HwVideoDecoder::decode_frame_at(double source_time_seconds) {
         }
     }
 
+    eof_ = true;
     return nullptr;
+}
+
+// ============================================================================
+// Sequential decode: seek_to, decode_next_frame, is_eof
+// ============================================================================
+
+bool HwVideoDecoder::is_eof() const {
+    return eof_;
+}
+
+bool HwVideoDecoder::seek_to(double timestamp_seconds) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    if (!is_open()) return false;
+
+    double clamped = timestamp_seconds;
+    if (clamped < 0) clamped = 0;
+    if (info_.duration_seconds > 0 && clamped > info_.duration_seconds)
+        clamped = info_.duration_seconds;
+
+    AVStream* stream = fmt_ctx_->streams[video_stream_idx_];
+    int64_t target_ts = (int64_t)(clamped / av_q2d(stream->time_base));
+
+    avcodec_flush_buffers(codec_ctx_);
+    int ret = av_seek_frame(fmt_ctx_, video_stream_idx_, target_ts,
+                            AVSEEK_FLAG_BACKWARD);
+    if (ret < 0) {
+        ret = av_seek_frame(fmt_ctx_, video_stream_idx_, 0, AVSEEK_FLAG_BACKWARD);
+        if (ret < 0) return false;
+    }
+    avcodec_flush_buffers(codec_ctx_);
+    eof_ = false;
+    return true;
+}
+
+double HwVideoDecoder::frame_pts_seconds() const {
+    if (!fmt_ctx_ || video_stream_idx_ < 0) return 0;
+    AVStream* stream = fmt_ctx_->streams[video_stream_idx_];
+    if (frame_->pts != AV_NOPTS_VALUE)
+        return (double)frame_->pts * av_q2d(stream->time_base);
+    return 0;
+}
+
+std::optional<DecodedFrame> HwVideoDecoder::build_decoded_frame() {
+    const uint32_t w = static_cast<uint32_t>(frame_->width);
+    const uint32_t h = static_cast<uint32_t>(frame_->height);
+    const size_t byte_count = static_cast<size_t>(w) * h * 4;
+
+    DecodedFrame df;
+    df.width  = w;
+    df.height = h;
+    df.format = GOPOST_PIXEL_FORMAT_RGBA8;
+    df.pts    = frame_->pts != AV_NOPTS_VALUE ? frame_->pts : 0;
+    df.timestamp_seconds = frame_pts_seconds();
+    df.pixels.resize(byte_count);
+
+    if (using_hw_) {
+        // Transfer from GPU surface to CPU
+        av_frame_unref(sw_frame_);
+        int err = av_hwframe_transfer_data(sw_frame_, frame_, 0);
+        if (err < 0) {
+            av_frame_unref(frame_);
+            return std::nullopt;
+        }
+        sw_frame_->width  = frame_->width;
+        sw_frame_->height = frame_->height;
+
+        AVPixelFormat src_fmt = static_cast<AVPixelFormat>(sw_frame_->format);
+        if (!sws_ctx_) {
+            sws_ctx_ = sws_getContext(
+                sw_frame_->width, sw_frame_->height, src_fmt,
+                sw_frame_->width, sw_frame_->height, AV_PIX_FMT_RGBA,
+                SWS_BILINEAR, nullptr, nullptr, nullptr);
+            if (!sws_ctx_) {
+                av_frame_unref(sw_frame_);
+                av_frame_unref(frame_);
+                return std::nullopt;
+            }
+        }
+
+        uint8_t* dst_data[1] = { df.pixels.data() };
+        int dst_linesize[1]  = { static_cast<int>(w * 4) };
+        sws_scale(sws_ctx_,
+                  sw_frame_->data, sw_frame_->linesize,
+                  0, sw_frame_->height,
+                  dst_data, dst_linesize);
+        av_frame_unref(sw_frame_);
+    } else {
+        uint8_t* dst_data[1] = { df.pixels.data() };
+        int dst_linesize[1]  = { static_cast<int>(w * 4) };
+        sws_scale(sws_ctx_,
+                  frame_->data, frame_->linesize,
+                  0, frame_->height,
+                  dst_data, dst_linesize);
+    }
+
+    av_frame_unref(frame_);
+    return df;
+}
+
+std::optional<DecodedFrame> HwVideoDecoder::decode_next_frame() {
+    std::lock_guard<std::mutex> lock(mutex_);
+    if (!is_open() || eof_) return std::nullopt;
+
+    while (av_read_frame(fmt_ctx_, packet_) >= 0) {
+        if (packet_->stream_index != video_stream_idx_) {
+            av_packet_unref(packet_);
+            continue;
+        }
+
+        int ret = avcodec_send_packet(codec_ctx_, packet_);
+        av_packet_unref(packet_);
+        if (ret < 0 && ret != AVERROR(EAGAIN)) continue;
+
+        ret = avcodec_receive_frame(codec_ctx_, frame_);
+        if (ret == AVERROR(EAGAIN)) continue;
+        if (ret == AVERROR_EOF) { eof_ = true; return std::nullopt; }
+        if (ret < 0) return std::nullopt;
+
+        return build_decoded_frame();
+    }
+
+    // Flush buffered frames
+    avcodec_send_packet(codec_ctx_, nullptr);
+    int ret = avcodec_receive_frame(codec_ctx_, frame_);
+    if (ret == 0) return build_decoded_frame();
+
+    eof_ = true;
+    return std::nullopt;
 }
 
 // ============================================================================

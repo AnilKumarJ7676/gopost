@@ -13,6 +13,7 @@ extern "C" {
 #include <libavutil/hwcontext.h>
 #include <libavutil/imgutils.h>
 #include <libswscale/swscale.h>
+#include <libavutil/display.h>
 }
 
 namespace gopost {
@@ -58,6 +59,9 @@ public:
     bool is_open() const override;
     VideoStreamInfo info() const override;
     GopostFrame* decode_frame_at(double source_time_seconds) override;
+    bool seek_to(double timestamp_seconds) override;
+    std::optional<DecodedFrame> decode_next_frame() override;
+    bool is_eof() const override;
 
     /// True if hardware decode path is active for the current file.
     bool is_hw_active() const { return using_hw_; }
@@ -72,6 +76,8 @@ private:
 
     GopostFrame* convert_frame_to_rgba();
     GopostFrame* transfer_hw_and_convert();
+    std::optional<DecodedFrame> build_decoded_frame();
+    double frame_pts_seconds() const;
 
     GopostEngine* engine_ = nullptr;
     std::string path_;
@@ -87,6 +93,7 @@ private:
     AVPacket* packet_ = nullptr;
     int video_stream_idx_ = -1;
     bool using_hw_ = false;
+    bool eof_ = false;
     AVPixelFormat hw_pix_fmt_ = AV_PIX_FMT_NONE;
     std::mutex mutex_;
 };

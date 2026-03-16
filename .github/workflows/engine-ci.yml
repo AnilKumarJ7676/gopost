@@ -2,17 +2,18 @@ name: Engine CI
 
 on:
   push:
-    branches: [main]
+    branches: [main, master]
     paths: ['gopost_app/native/**']
   pull_request:
-    branches: [main]
+    branches: [main, master]
     paths: ['gopost_app/native/**']
 
 jobs:
   build-and-test:
     strategy:
+      fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest]
+        os: [ubuntu-latest, macos-latest, windows-latest]
 
     runs-on: ${{ matrix.os }}
 
@@ -31,21 +32,35 @@ jobs:
           brew install cmake googletest llvm
 
       - name: Run clang-tidy
-        working-directory: gopost_app/native/gopost_engine
+        if: runner.os != 'Windows'
+        working-directory: gopost_app/native
         run: |
-          cmake -B build -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
+          cmake -B build -DCMAKE_EXPORT_COMPILE_COMMANDS=ON -DBUILD_TESTS=ON
           if command -v clang-tidy &> /dev/null; then
-            clang-tidy src/core/*.cpp -- -I include
+            clang-tidy gopost_core/src/gpu/*.cpp -- -I gopost_core/include
           fi
         continue-on-error: true
 
-      - name: Build
-        working-directory: gopost_app/native/gopost_engine
+      - name: Build (Unix)
+        if: runner.os != 'Windows'
+        working-directory: gopost_app/native
         run: |
-          cmake -B build -DCMAKE_BUILD_TYPE=Debug
+          cmake -B build -DCMAKE_BUILD_TYPE=Debug -DBUILD_TESTS=ON -DBUILD_GMOCK=ON
           cmake --build build
 
-      - name: Run tests
-        working-directory: gopost_app/native/gopost_engine
+      - name: Build (Windows)
+        if: runner.os == 'Windows'
+        working-directory: gopost_app/native
         run: |
-          cd build && ctest --output-on-failure
+          cmake -B build -DBUILD_TESTS=ON -DBUILD_GMOCK=ON
+          cmake --build build --config Debug
+
+      - name: Run tests (Unix)
+        if: runner.os != 'Windows'
+        working-directory: gopost_app/native/build
+        run: ctest --output-on-failure
+
+      - name: Run tests (Windows)
+        if: runner.os == 'Windows'
+        working-directory: gopost_app/native/build
+        run: ctest -C Debug --output-on-failure

@@ -9,6 +9,14 @@ namespace gopost::video_editor {
 ThumbnailProvider::ThumbnailProvider(QObject* parent) : QObject(parent) {}
 ThumbnailProvider::~ThumbnailProvider() = default;
 
+void ThumbnailProvider::promoteAndEvict(const QString& key) {
+    auto value = cache_.take(key);
+    cache_.insert(key, std::move(value));
+    while (cache_.size() > kMaxCacheEntries) {
+        cache_.erase(cache_.begin());
+    }
+}
+
 void ThumbnailProvider::requestThumbnails(const QString& sourcePath,
                                            double duration, int count,
                                            int priority) {
@@ -17,6 +25,7 @@ void ThumbnailProvider::requestThumbnails(const QString& sourcePath,
     // Check in-memory cache first
     auto it = cache_.find(sourcePath);
     if (it != cache_.end() && static_cast<int>(it->size()) >= count) {
+        promoteAndEvict(sourcePath);
         QList<QImage> list;
         for (const auto& img : *it) list.append(img);
         emit thumbnailsReady(sourcePath, list);
@@ -81,6 +90,7 @@ void ThumbnailProvider::extractThumbnails(const ClipThumbRequest& request) {
     QMetaObject::invokeMethod(this, [this, path = request.sourcePath,
                                      thumbs = std::move(thumbnails)]() mutable {
         cache_[path] = thumbs;
+        promoteAndEvict(path);
         QList<QImage> list;
         for (const auto& img : thumbs) list.append(img);
         emit thumbnailsReady(path, list);

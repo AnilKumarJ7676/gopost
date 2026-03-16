@@ -152,6 +152,61 @@ Page {
                     }
                 }
 
+                // Video Editor 2 Card (full width)
+                Rectangle {
+                    Layout.fillWidth: true
+                    Layout.leftMargin: 16
+                    Layout.rightMargin: 16
+                    Layout.topMargin: 12
+                    Layout.preferredHeight: 80
+                    radius: 16
+                    gradient: Gradient {
+                        orientation: Gradient.Horizontal
+                        GradientStop { position: 0.0; color: "#6C5CE7" }
+                        GradientStop { position: 1.0; color: "#00B894" }
+                    }
+
+                    MouseArea {
+                        anchors.fill: parent
+                        cursorShape: Qt.PointingHandCursor
+                        onClicked: router.push("/editor/video2")
+                    }
+
+                    RowLayout {
+                        anchors.fill: parent
+                        anchors.margins: 16
+                        spacing: 12
+
+                        Rectangle {
+                            width: 48; height: 48; radius: 12
+                            color: Qt.rgba(1, 1, 1, 0.2)
+                            Label {
+                                anchors.centerIn: parent
+                                text: "\uD83C\uDFAC"
+                                font.pixelSize: 24
+                            }
+                        }
+
+                        ColumnLayout {
+                            Layout.fillWidth: true
+                            spacing: 2
+                            Label {
+                                text: "Video Editor 2"
+                                font.pixelSize: 16; font.weight: Font.Bold; color: "white"
+                            }
+                            Label {
+                                text: "New timeline editor with full engine integration"
+                                font.pixelSize: 12; color: Qt.rgba(1, 1, 1, 0.8)
+                            }
+                        }
+
+                        Label {
+                            text: "\u2192"
+                            font.pixelSize: 24; color: "white"
+                        }
+                    }
+                }
+
                 // My Projects Section Header
                 RowLayout {
                     Layout.fillWidth: true

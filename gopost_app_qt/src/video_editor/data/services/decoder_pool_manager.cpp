@@ -1,4 +1,5 @@
 #include "video_editor/data/services/decoder_pool_manager.h"
+#include "core/platform/platform_defaults.h"
 
 #include <QSysInfo>
 #include <QDebug>
@@ -45,11 +46,7 @@ void DecoderPoolManager::dispose() {
 }
 
 int DecoderPoolManager::defaultMaxDecoders() {
-#if defined(Q_OS_IOS) || defined(Q_OS_ANDROID)
-    return 1; // Conservative on mobile
-#else
-    return 2; // Desktop can handle 2-3
-#endif
+    return platform::Defaults::forCurrentPlatform().maxDecoders;
 }
 
 } // namespace gopost::video_editor

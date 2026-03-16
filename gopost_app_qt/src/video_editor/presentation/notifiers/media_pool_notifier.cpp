@@ -1,10 +1,15 @@
 #include "video_editor/presentation/notifiers/media_pool_notifier.h"
 
 #include <QFileInfo>
+#include <QJsonArray>
+#include <QJsonDocument>
+#include <QJsonObject>
+#include <QProcess>
 #include <QUrl>
 #include <QUuid>
 #include <QVariantMap>
 #include <algorithm>
+#include <cmath>
 
 namespace gopost::video_editor {
 
@@ -88,8 +93,138 @@ void MediaPoolNotifier::importFile(const QString& path) {
     else if (audioExts.contains(ext))  asset.type = MediaAssetType::Audio;
     else                               asset.type = MediaAssetType::Video; // default
 
+    // Probe media metadata (duration, resolution, frame rate)
+    if (fi.exists()) {
+        probeMediaMetadata(asset);
+    }
+
+    qDebug() << "[MediaPool] asset added:" << asset.fileName
+             << "type=" << static_cast<int>(asset.type)
+             << "duration=" << asset.durationSeconds
+             << "resolution=" << asset.width << "x" << asset.height
+             << "fps=" << asset.frameRate;
+
     state_.assets.push_back(std::move(asset));
     emit stateChanged();
+}
+
+double MediaPoolNotifier::durationForPath(const QString& path) const {
+    for (const auto& asset : state_.assets) {
+        if (asset.filePath == path)
+            return asset.durationSeconds;
+    }
+    return 0.0;
+}
+
+void MediaPoolNotifier::probeMediaMetadata(MediaAsset& asset) {
+    // Images get a default duration of 5 seconds
+    if (asset.type == MediaAssetType::Image) {
+        asset.durationSeconds = 5.0;
+        qDebug() << "[MediaPool] image default duration: 5.0s";
+        return;
+    }
+
+    // Try ffprobe first for accurate duration/resolution
+    bool probed = false;
+
+    QProcess ffprobe;
+    ffprobe.setProcessChannelMode(QProcess::MergedChannels);
+    ffprobe.start(QStringLiteral("ffprobe"), {
+        QStringLiteral("-v"), QStringLiteral("quiet"),
+        QStringLiteral("-print_format"), QStringLiteral("json"),
+        QStringLiteral("-show_format"),
+        QStringLiteral("-show_streams"),
+        asset.filePath
+    });
+
+    if (ffprobe.waitForFinished(5000)) {
+        const QByteArray output = ffprobe.readAllStandardOutput();
+        QJsonParseError parseError;
+        auto doc = QJsonDocument::fromJson(output, &parseError);
+        if (parseError.error == QJsonParseError::NoError && doc.isObject()) {
+            auto root = doc.object();
+
+            // Duration from format
+            auto format = root.value(QStringLiteral("format")).toObject();
+            double dur = format.value(QStringLiteral("duration")).toString().toDouble();
+            if (dur > 0.0) {
+                asset.durationSeconds = dur;
+                probed = true;
+                qDebug() << "[MediaPool] ffprobe duration:" << dur << "s";
+            }
+
+            // Resolution and frame rate from video stream
+            auto streams = root.value(QStringLiteral("streams")).toArray();
+            for (const auto& s : streams) {
+                auto stream = s.toObject();
+                if (stream.value(QStringLiteral("codec_type")).toString() == QStringLiteral("video")) {
+                    int w = stream.value(QStringLiteral("width")).toInt();
+                    int h = stream.value(QStringLiteral("height")).toInt();
+                    if (w > 0 && h > 0) {
+                        asset.width = w;
+                        asset.height = h;
+                    }
+                    // Parse frame rate from "r_frame_rate" (e.g., "24000/1001")
+                    QString fpsStr = stream.value(QStringLiteral("r_frame_rate")).toString();
+                    if (!fpsStr.isEmpty()) {
+                        auto parts = fpsStr.split('/');
+                        if (parts.size() == 2) {
+                            double num = parts[0].toDouble();
+                            double den = parts[1].toDouble();
+                            if (den > 0) asset.frameRate = num / den;
+                        }
+                    }
+                    // Codec name
+                    asset.codec = stream.value(QStringLiteral("codec_name")).toString();
+
+                    // If no duration from format, try stream duration
+                    if (!probed) {
+                        double streamDur = stream.value(QStringLiteral("duration")).toString().toDouble();
+                        if (streamDur > 0.0) {
+                            asset.durationSeconds = streamDur;
+                            probed = true;
+                        }
+                    }
+                    break;
+                }
+            }
+
+            // For audio-only files, check audio stream duration
+            if (!probed) {
+                for (const auto& s : streams) {
+                    auto stream = s.toObject();
+                    if (stream.value(QStringLiteral("codec_type")).toString() == QStringLiteral("audio")) {
+                        double streamDur = stream.value(QStringLiteral("duration")).toString().toDouble();
+                        if (streamDur > 0.0) {
+                            asset.durationSeconds = streamDur;
+                            probed = true;
+                        }
+                        break;
+                    }
+                }
+            }
+        }
+    } else {
+        qDebug() << "[MediaPool] ffprobe not available or timed out, using fallback";
+    }
+
+    // Fallback: estimate duration from file size (bitrate heuristic)
+    if (!probed) {
+        QFileInfo fi(asset.filePath);
+        if (fi.exists() && fi.size() > 0) {
+            // Assume ~8 Mbps average bitrate
+            double estimatedSeconds = fi.size() * 8.0 / (8.0 * 1000.0 * 1000.0);
+            asset.durationSeconds = std::clamp(estimatedSeconds, 1.0, 360000.0);
+            asset.width = 1920;
+            asset.height = 1080;
+            asset.frameRate = 30.0;
+            qDebug() << "[MediaPool] fallback duration estimate:" << asset.durationSeconds << "s"
+                     << "(from file size:" << fi.size() << "bytes)";
+        } else {
+            asset.durationSeconds = 10.0;  // absolute fallback
+            qDebug() << "[MediaPool] file not readable, default duration: 10.0s";
+        }
+    }
 }
 
 void MediaPoolNotifier::removeAsset(const QString& assetId) {

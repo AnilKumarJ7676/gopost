@@ -53,6 +53,8 @@ Item {
     Shortcut { sequence: "Ctrl+D"; onActivated: internal.duplicateSelected() }
     Shortcut { sequence: "Ctrl+="; onActivated: if (timelineNotifier) timelineNotifier.zoomIn() }
     Shortcut { sequence: "Ctrl+-"; onActivated: if (timelineNotifier) timelineNotifier.zoomOut() }
+    Shortcut { sequence: "Ctrl+B"; onActivated: if (timelineNotifier) timelineNotifier.splitClipAtPlayhead() }
+    Shortcut { sequence: "Shift+Delete"; onActivated: if (timelineNotifier && timelineNotifier.selectedClipId >= 0) timelineNotifier.rippleDelete(timelineNotifier.selectedClipId) }
 
     ColumnLayout {
         anchors.fill: parent

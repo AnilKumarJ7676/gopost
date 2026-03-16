@@ -4,12 +4,16 @@
 set(RENDERING_BRIDGE_HEADERS
     engine_types.h
     engine_api.h
+    qprocess_video_decoder.h
+    render_decode_thread.h
     stub_image_editor_engine.h
     stub_video_timeline_engine.h
     template_bridge.h
 )
 
 set(RENDERING_BRIDGE_SOURCES
+    qprocess_video_decoder.cpp
+    render_decode_thread.cpp
     stub_image_editor_engine.cpp
     stub_video_timeline_engine.cpp
     template_bridge.cpp

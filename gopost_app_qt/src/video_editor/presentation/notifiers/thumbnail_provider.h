@@ -3,7 +3,7 @@
 #include <QObject>
 #include <QImage>
 #include <QString>
-#include <QHash>
+#include <QMap>
 #include <QFuture>
 #include <vector>
 
@@ -20,9 +20,7 @@ struct ClipThumbRequest {
 };
 
 // ---------------------------------------------------------------------------
-// ThumbnailProvider — async thumbnail extraction with caching
-//
-// Converted 1:1 from thumbnail_provider.dart.
+// ThumbnailProvider — async thumbnail extraction with bounded LRU caching
 // ---------------------------------------------------------------------------
 class ThumbnailProvider : public QObject {
     Q_OBJECT
@@ -47,9 +45,13 @@ signals:
                          const QList<QImage>& thumbnails);
 
 private:
-    QHash<QString, std::vector<QImage>> cache_;
+    static constexpr int kMaxCacheEntries = 100;
+
+    // QMap preserves insertion order for LRU eviction (oldest = begin())
+    QMap<QString, std::vector<QImage>> cache_;
 
     void extractThumbnails(const ClipThumbRequest& request);
+    void promoteAndEvict(const QString& key);
 };
 
 } // namespace gopost::video_editor

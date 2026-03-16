@@ -55,6 +55,12 @@ class TimelineNotifier : public QObject, public TimelineOperations {
     Q_PROPERTY(QVariantList markers   READ markersVariant  NOTIFY stateChanged)
     Q_PROPERTY(QVariantMap selectedClip READ selectedClipVariant NOTIFY stateChanged)
     Q_PROPERTY(int frameVersion READ frameVersion NOTIFY frameReady)
+    Q_PROPERTY(QString activeClipSource READ activeClipSource NOTIFY stateChanged)
+    Q_PROPERTY(double activeClipOffset READ activeClipOffset NOTIFY stateChanged)
+    Q_PROPERTY(double inPoint READ inPoint NOTIFY stateChanged)
+    Q_PROPERTY(double outPoint READ outPoint NOTIFY stateChanged)
+    Q_PROPERTY(bool hasInPoint READ hasInPoint NOTIFY stateChanged)
+    Q_PROPERTY(bool hasOutPoint READ hasOutPoint NOTIFY stateChanged)
 
 public:
     explicit TimelineNotifier(QObject* parent = nullptr);
@@ -87,6 +93,12 @@ public:
     QVariantList markersVariant() const;
     QVariantMap selectedClipVariant() const;
     int frameVersion() const { return frameVersion_; }
+    QString activeClipSource() const;
+    double activeClipOffset() const;
+    double  inPoint()    const { return state_.playback.inPoint.value_or(-1.0); }
+    double  outPoint()   const { return state_.playback.outPoint.value_or(-1.0); }
+    bool    hasInPoint() const { return state_.playback.inPoint.has_value(); }
+    bool    hasOutPoint() const { return state_.playback.outPoint.has_value(); }
 
     /// Set the video frame provider (not owned — registered with QML engine).
     void setFrameProvider(class VideoFrameProvider* provider) { frameProvider_ = provider; }

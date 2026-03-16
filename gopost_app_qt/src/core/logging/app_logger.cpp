@@ -1,17 +1,58 @@
 #include "core/logging/app_logger.h"
 
 #include <QDateTime>
+#include <QFile>
 #include <QLoggingCategory>
+#include <QMutex>
+#include <QTextStream>
+
+#include <cstdio>
 
 namespace gopost::core {
 
 bool AppLogger::s_initialized = false;
 CrashReportCallback AppLogger::onCrashReport = nullptr;
 
+static QFile* s_logFile = nullptr;
+static QMutex s_logMutex;
+
+static void fileMessageHandler(QtMsgType type, const QMessageLogContext& ctx, const QString& msg) {
+    Q_UNUSED(ctx);
+    const char* typeStr = "unknown";
+    switch (type) {
+    case QtDebugMsg:    typeStr = "debug"; break;
+    case QtInfoMsg:     typeStr = "info"; break;
+    case QtWarningMsg:  typeStr = "warning"; break;
+    case QtCriticalMsg: typeStr = "critical"; break;
+    case QtFatalMsg:    typeStr = "fatal"; break;
+    }
+    QString line = QStringLiteral("[%1] [%2] %3\n")
+        .arg(QDateTime::currentDateTime().toString(QStringLiteral("hh:mm:ss.zzz")))
+        .arg(QString::fromLatin1(typeStr))
+        .arg(msg);
+
+    // Write to log file
+    QMutexLocker lock(&s_logMutex);
+    if (s_logFile && s_logFile->isOpen()) {
+        s_logFile->write(line.toUtf8());
+        s_logFile->flush();
+    }
+    // Also write to stderr
+    fprintf(stderr, "%s", line.toUtf8().constData());
+    fflush(stderr);
+}
+
 void AppLogger::init() {
     if (s_initialized) return;
     s_initialized = true;
-    // Configure Qt logging categories/format as needed
+
+    // Open log file
+    s_logFile = new QFile(QStringLiteral("C:/tmp/gopost_app.log"));
+    s_logFile->open(QIODevice::WriteOnly | QIODevice::Truncate | QIODevice::Text);
+
+    // Install message handler
+    qInstallMessageHandler(fileMessageHandler);
+
     qSetMessagePattern(QStringLiteral("[%{time hh:mm:ss.zzz}] [%{type}] %{message}"));
 }
 

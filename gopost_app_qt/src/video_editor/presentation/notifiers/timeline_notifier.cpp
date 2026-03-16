@@ -734,6 +734,45 @@ QVariantMap TimelineNotifier::selectedClipVariant() const {
 }
 
 // ---------------------------------------------------------------------------
+// Active clip at playhead (for video preview)
+// ---------------------------------------------------------------------------
+
+QString TimelineNotifier::activeClipSource() const {
+    if (!state_.project) return {};
+    double pos = state_.playback.positionSeconds;
+    // Search from lowest track index (topmost visually) for a video/image clip
+    for (const auto& track : state_.project->tracks) {
+        for (const auto& clip : track.clips) {
+            if (clip.sourceType == ClipSourceType::Video ||
+                clip.sourceType == ClipSourceType::Image) {
+                if (pos >= clip.timelineIn - 0.001 && pos < clip.timelineOut + 0.001) {
+                    return clip.sourcePath;
+                }
+            }
+        }
+    }
+    return {};
+}
+
+double TimelineNotifier::activeClipOffset() const {
+    if (!state_.project) return 0.0;
+    double pos = state_.playback.positionSeconds;
+    for (const auto& track : state_.project->tracks) {
+        for (const auto& clip : track.clips) {
+            if (clip.sourceType == ClipSourceType::Video ||
+                clip.sourceType == ClipSourceType::Image) {
+                if (pos >= clip.timelineIn - 0.001 && pos < clip.timelineOut + 0.001) {
+                    // Offset into the source file, accounting for sourceIn and speed
+                    double relTime = pos - clip.timelineIn;
+                    return clip.sourceIn + relTime * clip.speed;
+                }
+            }
+        }
+    }
+    return 0.0;
+}
+
+// ---------------------------------------------------------------------------
 // Transform / Crop stubs
 // ---------------------------------------------------------------------------
 

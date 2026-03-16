@@ -30,8 +30,12 @@ Item {
     readonly property bool isSelected: clipId >= 0
                                        && (timelineNotifier ? timelineNotifier.selectedClipId === clipId : false)
     readonly property real speed: clipInfo.speed !== undefined ? clipInfo.speed : 1.0
+    readonly property string sourcePath: clipInfo.sourcePath || ""
 
     readonly property real pps: timelineNotifier ? timelineNotifier.pixelsPerSecond : 100
+
+    // Base64-encode sourcePath for use in image:// URL
+    readonly property string pathBase64: sourcePath !== "" ? Qt.btoa(sourcePath) : ""
 
     x: timelineIn * pps
     width: Math.max(4, duration * pps)
@@ -131,37 +135,110 @@ Item {
             }
         }
 
-        // Thumbnail placeholder area
-        Rectangle {
+        // Thumbnail area — shows actual video frames for video/image clips
+        Item {
+            id: thumbArea
             anchors.top: topBar.bottom
             anchors.bottom: parent.bottom
             anchors.left: parent.left
             anchors.right: parent.right
             anchors.margins: 1
-            color: Qt.rgba(clipColor.r, clipColor.g, clipColor.b, 0.06)
-            radius: 2
+            clip: true
 
-            // Waveform placeholder for audio clips
+            // Background
+            Rectangle {
+                anchors.fill: parent
+                color: Qt.rgba(clipColor.r, clipColor.g, clipColor.b, 0.06)
+                radius: 2
+            }
+
+            // Video/image thumbnail strip
             Row {
-                visible: sourceType === 0  // show for video (audio waveform)
+                id: thumbnailRow
+                anchors.fill: parent
+                visible: (sourceType === 0 || sourceType === 1) && pathBase64 !== ""
+                clip: true
+
+                // Each thumbnail is thumbHeight-tall with 16:9 aspect
+                readonly property int thumbHeight: Math.max(20, parent.height)
+                readonly property int thumbWidth: Math.max(30, Math.round(thumbHeight * 16.0 / 9.0))
+                readonly property int thumbCount: Math.max(1, Math.min(Math.ceil(parent.width / thumbWidth), 30))
+
+                Repeater {
+                    model: thumbnailRow.thumbCount
+                    Image {
+                        required property int index
+                        width: thumbnailRow.thumbWidth
+                        height: thumbnailRow.thumbHeight
+                        fillMode: Image.PreserveAspectCrop
+                        asynchronous: true
+                        cache: true
+                        // Calculate source time for this thumbnail position
+                        source: {
+                            if (pathBase64 === "" || duration <= 0) return ""
+                            var fraction = thumbnailRow.thumbCount > 1
+                                           ? index / (thumbnailRow.thumbCount - 1)
+                                           : 0.5
+                            var timeSec = timelineIn + fraction * duration
+                            return "image://videothumbnail/" + pathBase64 + "@"
+                                   + timeSec.toFixed(1) + "@" + thumbnailRow.thumbHeight
+                        }
+                    }
+                }
+            }
+
+            // Color overlay for non-video clips (title, color, adjustment)
+            Rectangle {
+                anchors.fill: parent
+                visible: sourceType >= 2 || pathBase64 === ""
+                color: Qt.rgba(clipColor.r, clipColor.g, clipColor.b, 0.12)
+                radius: 2
+
+                Label {
+                    anchors.centerIn: parent
+                    text: {
+                        switch (sourceType) {
+                        case 2: return "TITLE"
+                        case 3: return "COLOR"
+                        case 4: return "ADJ"
+                        default: return ""
+                        }
+                    }
+                    font.pixelSize: 9
+                    color: Qt.rgba(clipColor.r, clipColor.g, clipColor.b, 0.5)
+                    visible: text !== ""
+                }
+            }
+
+            // Waveform at bottom for video clips
+            Row {
+                visible: sourceType === 0
                 anchors.bottom: parent.bottom
                 anchors.left: parent.left
                 anchors.right: parent.right
-                anchors.bottomMargin: 2
-                anchors.leftMargin: 2
-                anchors.rightMargin: 2
-                height: 12
+                anchors.bottomMargin: 1
+                anchors.leftMargin: 1
+                anchors.rightMargin: 1
+                height: 10
                 spacing: 1
                 clip: true
+                z: 1
+
+                // Semi-transparent background
+                Rectangle {
+                    anchors.fill: parent
+                    color: Qt.rgba(0, 0, 0, 0.3)
+                    radius: 1
+                }
 
                 Repeater {
-                    model: Math.min(Math.floor(parent.width / 3), 60)
+                    model: Math.min(Math.floor(parent.width / 3), 50)
                     Rectangle {
                         width: 2
-                        height: 2 + Math.random() * 10
+                        height: 1 + Math.random() * 8
                         y: parent.height - height
                         radius: 1
-                        color: Qt.rgba(clipColor.r, clipColor.g, clipColor.b, 0.3)
+                        color: Qt.rgba(clipColor.r, clipColor.g, clipColor.b, 0.4)
                     }
                 }
             }

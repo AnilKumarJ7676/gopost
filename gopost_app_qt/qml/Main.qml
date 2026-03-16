@@ -69,6 +69,7 @@ ApplicationWindow {
 
         // Editor routes
         if (route === "/editor/video") return videoEditorComponent
+        if (route === "/editor/video2") return videoEditor2Component
         if (route === "/editor/image") return imageEditorComponent
         if (route.startsWith("/editor/customize/")) return templateCustomizationComponent
         if (route.startsWith("/editor/video/customize/")) return videoTemplateCustomizationComponent
@@ -100,6 +101,11 @@ ApplicationWindow {
     Component {
         id: videoEditorComponent
         Loader { source: "qrc:/qt/qml/GopostApp/qml/video_editor/screens/VideoEditorScreen.qml" }
+    }
+
+    Component {
+        id: videoEditor2Component
+        Loader { source: "qrc:/qt/qml/GopostApp/qml/video_editor_2/screens/VideoEditor2Screen.qml" }
     }
 
     Component {

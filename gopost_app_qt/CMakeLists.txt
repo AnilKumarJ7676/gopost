@@ -107,6 +107,12 @@ qt_add_qml_module(gopost_app_qt
         qml/template_browser/widgets/ShimmerLoading.qml
         qml/template_browser/widgets/TemplateCard.qml
         qml/go_craft/screens/GoCraftScreen.qml
+        qml/video_editor_2/screens/VideoEditor2Screen.qml
+        qml/video_editor_2/widgets/VE2Toolbar.qml
+        qml/video_editor_2/widgets/VE2PreviewPanel.qml
+        qml/video_editor_2/widgets/VE2TimelinePanel.qml
+        qml/video_editor_2/widgets/VE2PropertyPanel.qml
+        qml/video_editor_2/widgets/VE2MediaPoolPanel.qml
 )
 
 target_link_libraries(gopost_app_qt PRIVATE

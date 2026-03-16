@@ -4,9 +4,14 @@ import QtQuick.Layouts
 import QtQuick.Dialogs
 
 /**
- * VideoToolbar — import/add tools bar with file picking, panel shortcuts.
+ * VideoToolbar — import/add tools, NLE edit tools, panel shortcuts, track management.
  *
- * Converted 1:1 from video_toolbar.dart.
+ * Connects all remaining Q_INVOKABLE methods not covered by sidebar panels:
+ *   - splitClipAtPlayhead, rippleDelete
+ *   - setInPoint, setOutPoint, clearInOutPoints
+ *   - toggleProxyPlayback
+ *   - addTrack (video/audio/title/effect)
+ *   - createAdjustmentClip
  */
 Item {
     id: root
@@ -51,24 +56,73 @@ Item {
             visible: timelineNotifier.isReady
             spacing: 0
 
+            // === Import section ===
             ToolBtn { iconText: "\uD83C\uDFA5"; label: "Video"; enabled: !importing; onClicked: videoDialog.open() }
             ToolBtn { iconText: "\uD83D\uDDBC"; label: "Photo"; enabled: !importing; onClicked: imageDialog.open() }
 
-            // Separator
-            Rectangle { width: 1; height: 28; color: "#303050"; Layout.leftMargin: 4; Layout.rightMargin: 4 }
+            ToolSep {}
 
+            // === NLE Edit Tools ===
+            ToolBtn {
+                iconText: "\u2702"
+                label: "Split"
+                tooltip: "Split clip at playhead (Ctrl+B)"
+                enabled: timelineNotifier && timelineNotifier.selectedClipId >= 0
+                onClicked: timelineNotifier.splitClipAtPlayhead()
+            }
+            ToolBtn {
+                iconText: "\u232B"
+                label: "Ripple"
+                tooltip: "Ripple delete selected clip (Shift+Del)"
+                enabled: timelineNotifier && timelineNotifier.selectedClipId >= 0
+                onClicked: timelineNotifier.rippleDelete(timelineNotifier.selectedClipId)
+            }
+
+            ToolSep {}
+
+            // === In/Out Points ===
+            ToolBtn {
+                iconText: "["
+                label: "In"
+                tooltip: "Set In point (I)"
+                onClicked: timelineNotifier.setInPoint()
+            }
+            ToolBtn {
+                iconText: "]"
+                label: "Out"
+                tooltip: "Set Out point (O)"
+                onClicked: timelineNotifier.setOutPoint()
+            }
+            ToolBtn {
+                iconText: "\u2715"
+                label: "Clear"
+                tooltip: "Clear In/Out points (Alt+X)"
+                onClicked: timelineNotifier.clearInOutPoints()
+            }
+
+            ToolSep {}
+
+            // === Content creation ===
             ToolBtn { iconText: "T"; label: "Text"; onClicked: internal.addTextClip() }
+            ToolBtn {
+                iconText: "\u25A3"
+                label: "Adjust"
+                tooltip: "Create adjustment layer"
+                onClicked: timelineNotifier.createAdjustmentClip()
+            }
 
-            Rectangle { width: 1; height: 28; color: "#303050"; Layout.leftMargin: 4; Layout.rightMargin: 4 }
+            ToolSep {}
 
-            ToolBtn { iconText: "\u2728"; label: "Effects"; onClicked: timelineNotifier.setActivePanel(3) }   // effects
-            ToolBtn { iconText: "\uD83C\uDFA8"; label: "Color"; onClicked: timelineNotifier.setActivePanel(4) } // colorGrading
-            ToolBtn { iconText: "\u21C4"; label: "Transition"; onClicked: timelineNotifier.setActivePanel(5) }  // transitions
-            ToolBtn { iconText: "\u23F1"; label: "Keyframe"; onClicked: timelineNotifier.setActivePanel(8) }    // keyframes
-            ToolBtn { iconText: "\u266B"; label: "Audio"; onClicked: timelineNotifier.setActivePanel(9) }       // audio
+            // === Panel shortcuts ===
+            ToolBtn { iconText: "\u2728"; label: "Effects"; onClicked: timelineNotifier.setActivePanel(3) }
+            ToolBtn { iconText: "\uD83C\uDFA8"; label: "Color"; onClicked: timelineNotifier.setActivePanel(4) }
+            ToolBtn { iconText: "\u21C4"; label: "Trans."; onClicked: timelineNotifier.setActivePanel(5) }
+            ToolBtn { iconText: "\u23F1"; label: "Keyframe"; onClicked: timelineNotifier.setActivePanel(8) }
+            ToolBtn { iconText: "\u266B"; label: "Audio"; onClicked: timelineNotifier.setActivePanel(9) }
 
-            Rectangle { width: 1; height: 28; color: "#303050"; Layout.leftMargin: 4; Layout.rightMargin: 4 }
+            ToolSep {}
 
+            // === Track management ===
             ToolBtn { iconText: "+"; label: "Track"; onClicked: addTrackMenu.open() }
         }
 
@@ -83,12 +137,59 @@ Item {
 
         Item { Layout.fillWidth: true }
 
-        // Delete selected clip
-        ToolBtn {
-            visible: timelineNotifier.isReady && timelineNotifier.selectedClipId >= 0
-            iconText: "\uD83D\uDDD1"
-            label: "Delete"
-            onClicked: timelineNotifier.removeClip(timelineNotifier.selectedClipId)
+        // === Right side: Proxy toggle + Delete ===
+        RowLayout {
+            visible: timelineNotifier.isReady
+            spacing: 0
+
+            // Proxy playback toggle
+            Rectangle {
+                width: proxyRow.implicitWidth + 12
+                height: 32
+                radius: 6
+                color: timelineNotifier && timelineNotifier.useProxyPlayback
+                       ? Qt.rgba(0.4, 0.78, 0.55, 0.15) : "transparent"
+                border.color: timelineNotifier && timelineNotifier.useProxyPlayback
+                              ? "#66BB6A" : "#303050"
+                border.width: 1
+
+                RowLayout {
+                    id: proxyRow
+                    anchors.centerIn: parent
+                    spacing: 4
+                    Label {
+                        text: "\u25B6"
+                        font.pixelSize: 10
+                        color: timelineNotifier && timelineNotifier.useProxyPlayback ? "#66BB6A" : "#6B6B88"
+                    }
+                    Label {
+                        text: "Proxy"
+                        font.pixelSize: 11
+                        font.weight: Font.DemiBold
+                        color: timelineNotifier && timelineNotifier.useProxyPlayback ? "#66BB6A" : "#8888A0"
+                    }
+                }
+
+                MouseArea {
+                    anchors.fill: parent
+                    cursorShape: Qt.PointingHandCursor
+                    onClicked: timelineNotifier.toggleProxyPlayback()
+                }
+
+                ToolTip.visible: proxyHover.hovered
+                ToolTip.text: "Toggle proxy playback for smoother editing"
+                HoverHandler { id: proxyHover }
+            }
+
+            Item { width: 8 }
+
+            // Delete selected clip
+            ToolBtn {
+                visible: timelineNotifier.selectedClipId >= 0
+                iconText: "\uD83D\uDDD1"
+                label: "Delete"
+                onClicked: timelineNotifier.removeClip(timelineNotifier.selectedClipId)
+            }
         }
     }
 
@@ -120,7 +221,6 @@ Item {
         id: internal
 
         function addTextClip() {
-            // Add a text clip to a title track (create one if needed)
             timelineNotifier.addTrack(3); // title
             var clipId = timelineNotifier.addClip(0, 3, "", "Text", 5.0);
             if (clipId >= 0) timelineNotifier.selectClip(clipId);
@@ -144,6 +244,7 @@ Item {
     component ToolBtn: Item {
         property string iconText: ""
         property string label: ""
+        property string tooltip: ""
         property bool enabled: true
         signal clicked()
         width: col.implicitWidth + 16
@@ -174,5 +275,15 @@ Item {
             cursorShape: Qt.PointingHandCursor
             onClicked: parent.clicked()
         }
+
+        ToolTip.visible: tooltip !== "" && btnHover.hovered
+        ToolTip.text: tooltip
+        HoverHandler { id: btnHover }
+    }
+
+    // Separator component
+    component ToolSep: Rectangle {
+        width: 1; height: 28; color: "#303050"
+        Layout.leftMargin: 4; Layout.rightMargin: 4
     }
 }

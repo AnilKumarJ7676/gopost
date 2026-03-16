@@ -158,6 +158,7 @@ int TrackClipDelegate::addClip(int trackIndex,
     ops_->setState(std::move(state));
     ops_->pushUndo(before);
     ops_->syncNativeToProject();
+    ops_->debouncedRenderFrame();  // render preview for newly added clip
 
     return newClipId;
 }

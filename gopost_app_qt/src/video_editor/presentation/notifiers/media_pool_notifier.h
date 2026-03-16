@@ -87,6 +87,9 @@ public:
     Q_INVOKABLE void toggleSortOrder();
     Q_INVOKABLE void setViewMode(int mode);
 
+    // ---- query -------------------------------------------------------------
+    Q_INVOKABLE double durationForPath(const QString& path) const;
+
     // ---- persistence -------------------------------------------------------
     Q_INVOKABLE void loadFromData(const QVariantList& data);
     Q_INVOKABLE QVariantList toData() const;
@@ -102,6 +105,7 @@ private:
     MediaPoolState state_;
     QString selectedAssetId_;
     QString generateAssetId() const;
+    void probeMediaMetadata(MediaAsset& asset);
 };
 
 } // namespace gopost::video_editor

@@ -287,7 +287,9 @@ void PlaybackDelegate::onPlaybackTick() {
     const double outPt = state.playback.outPoint.value_or(duration);
 
     if (newPos >= outPt) {
-        newPos = state.playback.inPoint.value_or(0.0);
+        // Stop at end — don't loop. User can press play again to restart.
+        newPos = outPt;
+        state.playback.isPlaying = false;
     } else if (newPos < 0.0) {
         newPos = 0.0;
         state.playback.isPlaying = false;
@@ -296,7 +298,9 @@ void PlaybackDelegate::onPlaybackTick() {
     state.playback.positionSeconds = newPos;
     ops_->setState(std::move(state));
     ops_->updateActiveVideo();
-    requestRender();
+    // Use throttled render during playback to avoid redundant stateChanged emissions.
+    // setState() above already emits stateChanged for QML updates.
+    ops_->throttledRenderFrame();
 }
 
 } // namespace gopost::video_editor

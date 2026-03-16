@@ -22,6 +22,7 @@
 #include "video_editor/presentation/notifiers/proxy_provider.h"
 #include "video_editor/presentation/notifiers/thumbnail_provider.h"
 #include "video_editor/presentation/notifiers/video_frame_provider.h"
+#include "video_editor/presentation/notifiers/video_thumbnail_provider.h"
 #include "template_browser/presentation/models/home_notifier.h"
 #include "template_browser/presentation/models/template_list_notifier.h"
 #include "template_browser/presentation/models/template_search_notifier.h"
@@ -149,6 +150,11 @@ void ServiceLocator::registerWithQml(QQmlApplicationEngine* engine) {
         m_timelineNotifier->setFrameProvider(frameProvider);
         qDebug() << "[ServiceLocator] videopreview image provider registered";
     }
+
+    // Register video thumbnail provider for timeline clip thumbnails
+    auto* thumbProvider = new video_editor::VideoThumbnailProvider();
+    engine->addImageProvider(QStringLiteral("videothumbnail"), thumbProvider);
+    qDebug() << "[ServiceLocator] videothumbnail image provider registered";
 
     // Core
     setCtx(ctx, QStringLiteral("router"), m_router.get());

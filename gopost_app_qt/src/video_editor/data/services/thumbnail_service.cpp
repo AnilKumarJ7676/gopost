@@ -102,6 +102,7 @@ QString ThumbnailService::hwaccelArgs() const {
 }
 
 QList<QByteArray> ThumbnailService::getCached(const QString& sourcePath, int count) {
+    QMutexLocker lock(&cacheMutex_);
     const auto key = cacheKey(sourcePath, count);
     auto it = cache_.find(key);
     if (it != cache_.end()) {
@@ -117,12 +118,16 @@ QList<QByteArray> ThumbnailService::extractThumbnails(
     ensureGpuProbed();
 
     const auto key = cacheKey(sourcePath, count);
-    if (cache_.contains(key)) return cache_[key];
+
+    {
+        QMutexLocker lock(&cacheMutex_);
+        if (cache_.contains(key)) return cache_[key];
+    }
 
     const auto dir = ensureThumbDir();
     const uint hash = static_cast<uint>(qHash(sourcePath));
 
-    // Check disk cache
+    // Check disk cache (no lock needed — disk I/O is thread-safe per-file)
     QList<QByteArray> thumbs;
     bool allCached = true;
     for (int i = 0; i < count; ++i) {
@@ -137,6 +142,7 @@ QList<QByteArray> ThumbnailService::extractThumbnails(
     }
 
     if (allCached && thumbs.size() == count) {
+        QMutexLocker lock(&cacheMutex_);
         cache_[key] = thumbs;
         promoteAndEvict(key);
         return thumbs;
@@ -147,6 +153,7 @@ QList<QByteArray> ThumbnailService::extractThumbnails(
         sourcePath, safeDuration, count, dir.path(), hash);
 
     if (!result.isEmpty()) {
+        QMutexLocker lock(&cacheMutex_);
         cache_[key] = result;
         promoteAndEvict(key);
     }
@@ -175,9 +182,13 @@ std::optional<QByteArray> ThumbnailService::extractSingleThumbnail(
     ensureGpuProbed();
 
     const auto singleKey = QStringLiteral("%1::single").arg(sourcePath);
-    auto cached = cache_.find(singleKey);
-    if (cached != cache_.end() && !cached->isEmpty())
-        return cached->first();
+
+    {
+        QMutexLocker lock(&cacheMutex_);
+        auto cached = cache_.find(singleKey);
+        if (cached != cache_.end() && !cached->isEmpty())
+            return cached->first();
+    }
 
     const auto dir = ensureThumbDir();
     const uint hash = static_cast<uint>(qHash(sourcePath));
@@ -186,6 +197,7 @@ std::optional<QByteArray> ThumbnailService::extractSingleThumbnail(
 
     if (file.exists() && file.size() > 0 && file.open(QIODevice::ReadOnly)) {
         const auto bytes = file.readAll();
+        QMutexLocker lock(&cacheMutex_);
         cache_[singleKey] = {bytes};
         promoteAndEvict(singleKey);
         return bytes;
@@ -204,6 +216,7 @@ std::optional<QByteArray> ThumbnailService::extractSingleThumbnail(
 
     if (result.success && file.exists() && file.size() > 0 && file.open(QIODevice::ReadOnly)) {
         const auto bytes = file.readAll();
+        QMutexLocker lock(&cacheMutex_);
         cache_[singleKey] = {bytes};
         promoteAndEvict(singleKey);
         return bytes;
@@ -276,7 +289,27 @@ QStringList ThumbnailService::parseArgs(const QString& command) {
 }
 
 void ThumbnailService::clearCache() {
+    QMutexLocker lock(&cacheMutex_);
     cache_.clear();
+}
+
+void ThumbnailService::purgeDiskCache(qint64 maxBytes) {
+    const auto dir = ensureThumbDir();
+    auto entries = dir.entryInfoList({QStringLiteral("*.jpg")}, QDir::Files, QDir::Time);
+
+    qint64 totalSize = 0;
+    for (const auto& fi : entries) totalSize += fi.size();
+
+    if (totalSize <= maxBytes) return;
+
+    int removed = 0;
+    for (int i = entries.size() - 1; i >= 0 && totalSize > maxBytes; --i) {
+        totalSize -= entries[i].size();
+        QFile::remove(entries[i].absoluteFilePath());
+        ++removed;
+    }
+    qDebug() << "[ThumbnailService] Purged" << removed << "disk cache files,"
+             << "remaining:" << totalSize / 1024 << "KB";
 }
 
 } // namespace gopost::video_editor
