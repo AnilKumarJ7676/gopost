@@ -14,6 +14,9 @@ set(VIDEO_ENGINE_SOURCES
     src/video/decoder_pool.cpp
     src/video/thumbnail_generator.cpp
     src/video/decoder_pool_api.cpp
+    src/video/ring_frame_buffer.cpp
+    src/video/decode_thread.cpp
+    src/video/playback_controller.cpp
     src/texture/texture_bridge_cpu.cpp
 )
 
@@ -45,6 +48,7 @@ else()
 endif()
 
 add_library(gopost_video_engine SHARED ${VIDEO_ENGINE_SOURCES})
+set_target_properties(gopost_video_engine PROPERTIES WINDOWS_EXPORT_ALL_SYMBOLS ON)
 
 target_include_directories(gopost_video_engine PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/include

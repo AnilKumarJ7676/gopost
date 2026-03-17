@@ -1,15 +1,13 @@
 {
   "permissions": {
     "allow": [
-      "Bash(flutter:*)",
-      "Bash(go version:*)",
-      "Bash(docker:*)",
-      "Bash(cmake:*)",
-      "Bash(git:*)",
-      "Bash(dart:*)",
-      "Bash(java:*)",
-      "Bash(\"C:/Program Files/Microsoft Visual Studio/2022/Community/VC/Auxiliary/Build/vcvarsall.bat\" x64 > /dev/null 2>&1 && echo \"MSVC_AVAILABLE\" || echo \"MSVC_NOT_AVAILABLE\"; ls \"C:/Program Files/Microsoft Visual Studio/2022/Community/VC/Tools/MSVC/\" 2>/dev/null || echo \"NO_MSVC_TOOLS\")",
-      "Bash(cd:*)"
+      "Bash(flutter analyze:*)",
+      "Bash(dart analyze:*)",
+      "Bash(find:*)",
+      "Bash(cd:*)",
+      "Bash(grep:*)",
+      "Bash(grep -E \"^./gopost_app/[^/]+\\(/[^/]+\\)?$\")",
+      "Bash(sort cat:*)"
     ]
   }
 }

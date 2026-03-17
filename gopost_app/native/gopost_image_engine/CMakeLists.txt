@@ -20,6 +20,7 @@ if(APPLE)
 endif()
 
 add_library(gopost_image_engine SHARED ${IMAGE_ENGINE_SOURCES})
+set_target_properties(gopost_image_engine PROPERTIES WINDOWS_EXPORT_ALL_SYMBOLS ON)
 
 target_include_directories(gopost_image_engine PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/include
@@ -29,6 +30,16 @@ target_include_directories(gopost_image_engine PRIVATE
 )
 
 target_link_libraries(gopost_image_engine PUBLIC gopost_core)
+
+# FreeType + HarfBuzz for vector text rendering (conditionally linked)
+if(GOPOST_HAS_FREETYPE)
+    target_link_libraries(gopost_image_engine PRIVATE Freetype::Freetype)
+    target_compile_definitions(gopost_image_engine PRIVATE GOPOST_HAS_FREETYPE)
+endif()
+if(GOPOST_HAS_HARFBUZZ)
+    target_link_libraries(gopost_image_engine PRIVATE harfbuzz)
+    target_compile_definitions(gopost_image_engine PRIVATE GOPOST_HAS_HARFBUZZ)
+endif()
 
 # Force-load entire static archive so FFI entry points (called only from Dart) are exported
 if(APPLE)

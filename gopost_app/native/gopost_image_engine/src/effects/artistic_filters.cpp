@@ -385,4 +385,11 @@ GopostError gopost_effect_halftone(GopostFrame* frame, float dot_size, float ang
     return GOPOST_OK;
 }
 
+// Non-Apple stub — Metal shader source only available on Apple platforms
+#if !defined(__APPLE__)
+const char* gopost_artistic_compute_shader_source(void) {
+    return nullptr;
+}
+#endif
+
 } // extern "C"
